@@ -1646,11 +1646,9 @@ int vm_insert_pfn_prot(struct vm_area_struct *vma, unsigned long addr,
 }
 EXPORT_SYMBOL(vm_insert_pfn_prot);
 
-int vm_insert_mixed(struct vm_area_struct *vma, unsigned long addr,
-			pfn_t pfn)
+int vm_insert_mixed_prot(struct vm_area_struct *vma, unsigned long addr,
+			 pfn_t pfn, pgprot_t pgprot)
 {
-	pgprot_t pgprot = vma->vm_page_prot;
-
 	BUG_ON(!(vma->vm_flags & VM_MIXEDMAP));
 
 	if (addr < vma->vm_start || addr >= vma->vm_end)
@@ -1678,7 +1676,7 @@ int vm_insert_mixed(struct vm_area_struct *vma, unsigned long addr,
 	}
 	return insert_pfn(vma, addr, pfn, pgprot);
 }
-EXPORT_SYMBOL(vm_insert_mixed);
+EXPORT_SYMBOL(vm_insert_mixed_prot);
 
 /*
  * maps a range of physical memory into the requested pages. the old
