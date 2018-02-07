@@ -1,0 +1,165 @@
+ZUFS - Zer-copy User-mode Filesystem
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Glossery and names:
+~~~~~~~~~~~~~~~~~~~
+
+ZUF - Zero-copy User-mode Feeder
+  zuf.ko is the Kernel VFS component. Its job is to interface with the Kernel
+  VFS and dispatch commands to a User-mode application Server.
+
+ZUS - Zero-copy User-mode Server
+  zufs utilizes a User-mode server application. That takes care of the detailed
+  communication protocol and correctness with the Kernel.
+  In turn it uses many zusfs Filesystem plugins to implement the actual
+  on disc Filesystem.
+
+zusfs - FS plugins
+  These are .so loadable modules that implement one or more Filesystem-types
+  (-t xyz).
+  The main server communicates with the plugin via a set of function vectors
+  for the different operations.
+
+Filesystem-type:
+  At startup zus registers with the Kernel one or more Filesystem-type(s)
+  Associated with the type is a 4 letter type-name (-t fstn) different
+  info about the fs, like a magic number and so on.
+  One Server can support many FS-types, in turn each FS-type can mount
+  multiple super-blocks, each supporting multiple devices.
+
+Device-table - (A zufs FS can support multiple devices)
+  ZUF in Kernel may receive, like any mount command a block-device, a filename
+  or none. For the former two options if the specified FS-types states so
+  in a special field. The mount will look for a Device table. A list of devices
+  in a specific order sitting at some offset on the block-device, or file
+  received. The system will then proceed to open and own all these devices
+  and associate it to the mounting super-block.
+  If FS-type specifies a -1 at DT_offset then there is no device table
+  and a DT of a single device is created. (If we have no devices, none
+  is specified than we operate without any block devices. Probably mount
+  options give some indication of the storage information)
+  The device table has special consideration for pmem devices and will
+  present the all linear array of devices to zus, as one flat mmap space.
+  Alternatively all none pmem devices are also provided an interface
+  with facility of data movement from pmem to a slower device.
+  A detailed NUMA info is exported to the Server for maximum utilization.
+
+pmem:
+  Multiple pmem devices are presented to the server as a single
+  linear file mmap. Something like /dev/dax. But it is strictly
+  available only to that specific super-block that owns it.
+  
+dpp_t - Dual port pointer type
+  At some points in the protocol there are objects that return from zus
+  (The Server) to the Kernel via a dpp_t. This is a special kind of pointer
+  It is actually an offset 8 bytes aligned with the 3 low bits specifying
+  a pool code
+	int :3  pool;
+	int :61 offset;
+  pool == 0 means the offset is in pmem who's management is by zuf and
+  a full easy access is provided for zus.
+
+  pool != 0 Is a pre-established tempfs file (up to 6 such files) where
+  the zus has an mmap on the file and the Kernel can access that data
+  via an offset into the file.
+  All dpp_t objects life time rules are strictly defined.
+  Mainly the primary use of dpp_t is the on-pmem inode structure. Both
+  zus and zuf can access and change this structure. On any modification
+  the zus is called so to be notified of any changes, persistence.
+  More such objects are: Symlinks, xattrs, mmap-data-blocks ...
+
+Relay-wait-object:
+  communication between Kernel and server are done via zus-threads that
+  sleep in Kernel (inside an IOCTL) and wait for commands. Once received
+  the IOCTL returns operation id executed and the return is returned via
+  a new IOCTL call, which then waits for the next operation.
+  To wake up the sleeping thread we use a Relay-wait-object. Currently
+  it is two waitqueue_head(s) back to back.
+  In future we should investigate the use of that special binder object
+  that releases its thread time slice to the other thread without going through
+  the scheduler.
+
+ZT-threads-array:
+  The novelty of the zufs is the ZT-treads system ....
+  // /// /// copy paste from the plumbers power-point
+
+Philosophy of operations:
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+zuf-root
+   ^
+   |
+zus-daemon
+   ^
+   |
+ FS-type-1, FS-type-2, ... FS-type-n
+   ^
+   |
+  sb-1, sb-2, ... sb-n
+
+
+Below is the order of operations
+
+1. [zuf-root]
+
+On module load  (zuf.ko) A special pseudo FS is mounted on /sys/fs/zuf. This is
+called zuf-root.
+The zuf-root has no visible files. All communication is done via special-files.
+special-files are open(O_TMPFILE) which establish a special role via an
+IOCTL.
+All communications with the server are done via the zuf-root. Each root owns
+many FS-types and each FS-type owns many super-blocks of this type. All Sharing
+the same communication channels.
+Since all FS-type Servers live in the same zus application address space, at
+times. If the administrator wants to separate between different servers, he/she
+can mount a new zuf-root and point a new server instance on that new mount,
+registering other FS-types on that other instance. The all communication array
+will then be duplicated as well.
+(Otherwise pointing a new server instance on a busy root will return an error)
+
+2. [zus server start]
+  - On load all configured zusfs plugins are loaded.
+  - The Server starts by starting a single mount thread.
+  - It than proceeds to register with Kernel all FS-types it will support.
+    (This is done on the single mount thread, so all FS-registration and
+     mount/umount operate in a single thread and therefor need not any locks)
+  - Sleeping in the Kernel on a special-file of that zuf-root. waiting for a mount
+    command.
+
+3. [mount -t xyz]
+  [In Kernel]
+  - If xyz was registered above as part of the Server startup. the regular
+  mount command will come to the zuf module with a zuf_mount() call. with
+  the xyz-FS-info. In turn this points to a zuf-root.
+  - Code than proceed to load a device-table of devices as  specified in
+    the passed device. It is built so any of the many devices can be
+    specified on mount command and they will always mount in the same
+    device-table order. It then establishes an md object.
+  - It proceeds to call mount_bdev. Always with the same main-device
+    thous fully sporting automatic bind mounts. Even if different
+    devices are given to the mount device.
+  - In zuf_fill_super it will then call (awaken) the mount thread
+    specifying two parameters. One the FS-type to mount, and then
+    the md_ID Associated with this super_block.
+    
+  [In zus]
+  - A zus_super_block_info is allocated.
+  - zus calls PMEM_GRAB(md_ID) to establish a direct mapping to its
+    pmem devices. Since on mount it might need to walk its on disk
+    structures appon mount. On return we have full access to
+    our PMEM
+  - ZT-threads-array
+    If this is the first mount the all ZT-threads-array is created
+    and established. The mount thread will wait until all zt-threads
+    finished initialization and ready to rock.
+  - Root-zus_inode is loaded and is returned to kernel
+  - More info about the mount like block sizes and so on are
+    returned to kernel
+
+  [In Kernel]
+   The zuf_fill_super is finalized vectors established and we have a new
+   super_block ready for operations.
+   
+  
+  
