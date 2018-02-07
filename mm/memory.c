@@ -1562,8 +1562,8 @@ static int insert_pfn(struct vm_area_struct *vma, unsigned long addr,
 	if (!pte)
 		goto out;
 	retval = -EBUSY;
-	if (!pte_none(*pte))
-		goto out_unlock;
+// 	if (!pte_none(*pte))
+// 		goto out_unlock;
 
 	/* Ok, finally just insert the thing.. */
 	if (pfn_t_devmap(pfn))
@@ -1574,7 +1574,7 @@ static int insert_pfn(struct vm_area_struct *vma, unsigned long addr,
 	update_mmu_cache(vma, addr, pte); /* XXX: why not for insert_page? */
 
 	retval = 0;
-out_unlock:
+// out_unlock:
 	pte_unmap_unlock(pte, ptl);
 out:
 	return retval;
