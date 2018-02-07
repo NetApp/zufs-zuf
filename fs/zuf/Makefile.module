@@ -1,0 +1,79 @@
+#
+# ZUF: Zero-copy User-mode Feeder
+#
+# Copyright (c) 2018 NetApp Ltd. All rights reserved.
+#
+# ZUFS-License: GPL-2.0 OR BSD-3-Clause. See module.c for LICENSE details.
+#
+
+SHELL	 := /bin/bash
+KDIR     ?= /lib/modules/`uname -r`/build
+MDIR     ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+VER      ?= $(shell git describe --always)
+GITINFO  ?= $(shell git rev-parse HEAD)
+BUILD_ID ?= 0
+O        ?=
+
+MODULE   := $(O)/$(MDIR)/m1fs.ko
+NAME     ?= m1fs-module
+NAME_TAG ?=
+
+# Kconfig simulation (Kconfig doesn't work with out-of-tree modules)
+PARAMS += CONFIG_M1FS=m
+PARAMS += CONFIG_M1FS_POSIX_ACL=y
+
+CFLAGS_MODULE += -DM1FS_RELVERSION=$(VER)-$(BUILD_ID)
+CFLAGS_MODULE += -DM1FS_GITINFO=$(GITINFO)
+CFLAGS_MODULE += -DCONFIG_M1FS_POSIX_ACL
+
+# note that we don't allow debug packaging because of GPL
+ifneq ($(DEBUG),)
+  PARAMS += CONFIG_M1FS_DEBUG=y
+  CFLAGS_MODULE += -DCONFIG_M1FS_DEBUG
+endif
+
+PARAMS += CFLAGS_MODULE="$(CFLAGS_MODULE)"
+# end of Kconfig simulation
+
+pkg := rpm deb
+
+build:
+	$(MAKE) -C $(KDIR) M=$(MDIR) $(PARAMS) modules
+
+clean:
+	$(MAKE) -C $(KDIR) M=$(MDIR) clean
+	rm -f $(O)/$(MDIR)/$(NAME)-*
+
+install: build
+	$(MAKE) -C $(KDIR) M=$(MDIR) modules_install
+
+rpm_dep = "kernel = $(subst .x86_64,,$(KVER))"
+deb_dep = "linux-image-$(KVER)"
+
+$(pkg): build
+	$(eval TMPDIR := $(shell mktemp -d))
+	$(eval KVER := $(shell cat $(KDIR)/$(O)/include/config/kernel.release))
+	@/sbin/modinfo $(O)/$(MDIR)/m1fs.ko | grep -q GPL && echo "Error: Release version cannot be GPL" && false || :
+	$(MAKE) -C $(KDIR) M=$(MDIR) DEPMOD=true INSTALL_MOD_PATH=$(TMPDIR) modules_install
+	/bin/echo -e "#!/bin/bash\ndepmod $(KVER)" > $(TMPDIR).postinst
+	fpm -f -s dir -t $@ -n $(NAME)$(NAME_TAG) -v $(VER) -C $(TMPDIR) \
+	    -p $(O)/$(MDIR) --after-install $(TMPDIR).postinst \
+	    --url "plexistor.com" --license "Proprietary" --vendor "Plexistor Ltd." \
+	    --description "M1FS kernel module\nID: $(GITINFO)" \
+	    --iteration $(BUILD_ID) --epoch 1 \
+	    --depends $($(@)_dep) --provides $(NAME) .
+	rm -rf $(TMPDIR)*
+
+$(addsuffix -devel, $(pkg)):
+	$(eval TMPDIR := $(shell mktemp -d))
+	mkdir -p $(TMPDIR)/usr/include/m1fs
+	cp $(MDIR)/m1fs_def.h $(TMPDIR)/usr/include/m1fs
+	fpm -f -s dir -t $(subst -devel,,$@) -n $(NAME)-devel$(NAME_TAG) -v $(VER) \
+	    -C $(TMPDIR) -p $(O)/$(MDIR) --iteration $(BUILD_ID) --epoch 1 \
+	    --url "plexistor.com" --license "Proprietary" --vendor "Plexistor Ltd." \
+	    --description "M1FS kernel module devel\nID: $(GITINFO)" \
+	    --depends $(NAME) .
+	rm -rf $(TMPDIR)*
+
+
+.PHONY: clean build install $(pkg)

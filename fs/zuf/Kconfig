@@ -1,0 +1,23 @@
+menuconfig ZUF
+	tristate "ZUF - Zero-copy User-mode Feeder"
+	depends on BLOCK
+	depends on ZONE_DEVICE
+	select CRC16
+	select MEMCG
+	help
+	   ZUFS Kernel part.
+	   To enable say Y here.
+
+	   To compile this as a module,  choose M here: the module will be
+	   called zuf.ko
+
+if ZUF
+
+config ZUF_DEBUG
+	bool "ZUF: enable debug subsystems use"
+	depends on ZUF
+	default n
+	help
+	  INTERNAL QA USE ONLY!!! DO NOT USE!!!
+
+endif

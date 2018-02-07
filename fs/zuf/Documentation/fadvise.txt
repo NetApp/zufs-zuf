@@ -1,0 +1,23 @@
+Basically, it is the task of reading-ahead pages in case a sequential-access
+pattern is detected.
+
+There is a variable at:
+	/sys/devices/virtual/bdi/m1fs-<partition-number>/read_ahead_kb.
+the default is set to 32k
+
+Our read-ahead mechanism sticks to the following rules:
+* we always read as much as the user's buffer allows us.
+* if the file is not tagged (i.e. normal-accessed), and the buffer size
+  is smaller than read_ahead_kb, we will read ahead up to
+  read_ahead_kb, as if the buffer size was read_ahead_kb;
+  unless we detect random access, in which case we disable
+  read-ahead for that random access.
+* if the file is tagged sequential, we read-ahead upto 2*read_ahead_kb
+  (in case the buffer size is smaller), i.e. twice as if the file was not
+  tagged.
+* if the file is tagged random, no read-ahead will ever take place.
+* If a file is seeked back the first read will not do read-ahead
+  but if a sequential access is detected after that we will resume
+  read-ahead again.
+
+This is the basic functionality of fadvise. See "man fadvise64".
