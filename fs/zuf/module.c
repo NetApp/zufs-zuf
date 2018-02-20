@@ -46,6 +46,6 @@
 MODULE_AUTHOR("Boaz Harrosh <boazh@netapp.com>");
 MODULE_AUTHOR("Sagi Manole <sagim@netapp.com>");
 MODULE_DESCRIPTION("Zero-copy User-mode Feeder");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(__stringify(ZUFS_MAJOR_VERSION) "."
 		__stringify(ZUFS_MINOR_VERSION));
