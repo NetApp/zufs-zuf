@@ -808,6 +808,10 @@ const struct file_operations zuf_file_operations = {
 	.copy_file_range	= zuf_copy_file_range,
 	.remap_file_range	= zuf_clone_file_range,
 	.fadvise		= zuf_fadvise,
+	.unlocked_ioctl		= zuf_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl		= zuf_compat_ioctl,
+#endif
 };
 
 const struct inode_operations zuf_file_inode_operations = {
