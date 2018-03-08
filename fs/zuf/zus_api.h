@@ -466,6 +466,7 @@ enum e_zufs_operation {
 	ZUFS_OP_SYNC		= 20,
 	ZUFS_OP_FALLOCATE	= 21,
 	ZUFS_OP_LLSEEK		= 22,
+	ZUFS_OP_IOCTL		= 23,
 	ZUFS_OP_FIEMAP		= 28,
 
 	ZUFS_OP_GET_MULTY	= 29,
@@ -706,6 +707,42 @@ struct zufs_ioc_seek {
 
 	/* OUT */
 	__u64 offset_out;
+};
+
+/* ZUFS_OP_IOCTL */
+/* Flags for zufs_ioc_ioctl->kflags */
+enum e_ZUFS_IOCTL_KFLAGS {
+	ZUFS_IOC_FSFROZEN	= 0x1,	/* Tell Server we froze the FS	  */
+	ZUFS_IOC_CAP_ADMIN	= 0x2,	/* The ioctl caller had CAP_ADMIN */
+};
+
+/* received for zus on zufs_ioc_ioctl->uflags */
+enum e_ZUFS_IOCTL_UFLAGS {
+	ZUFS_IOC_REALLOC	= 0x1,	/*_IOC_SIZE(cmd) was not it and Server
+					 * needs a deeper copy
+					 */
+	ZUFS_IOC_FREEZE_REQ	= 0x2,	/* Server needs a freeze and a recall */
+};
+
+struct zufs_ioc_ioctl {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 time;
+	__u32 cmd;
+	__u32 kflags; /* zuf/kernel state and flags*/
+
+	/* OUT */
+	/* This is just a zero-size marker for the start of output */
+	char out_start[0];
+	union {
+		struct { /* If return was -EZUFS_RETRY */
+			__u32 uflags; /* flags returned from zus */
+			__u32 new_size;
+		};
+
+		char arg[0];
+	};
 };
 
 /* ZUFS_OP_FIEMAP */

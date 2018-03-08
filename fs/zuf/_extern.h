@@ -126,6 +126,12 @@ int zuf_file_mmap(struct file *file, struct vm_area_struct *vma);
 /* t1.c */
 int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);
 
+/* ioctl.c */
+long zuf_ioctl(struct file *filp, uint cmd, ulong arg);
+#ifdef CONFIG_COMPAT
+long zuf_compat_ioctl(struct file *file, uint cmd, ulong arg);
+#endif
+
 /*
  * Inode and files operations
  */
