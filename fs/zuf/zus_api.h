@@ -350,6 +350,7 @@ enum e_zufs_operation {
 	ZUFS_OP_SYNC,
 	ZUFS_OP_FALLOCATE,
 	ZUFS_OP_LLSEEK,
+	ZUFS_OP_IOCTL,
 
 	ZUFS_OP_BREAK,		/* Kernel telling Server to exit */
 	ZUFS_OP_MAX_OPT,
@@ -584,6 +585,21 @@ struct zufs_ioc_seek {
 
 	/* OUT */
 	__u64 offset_out;
+};
+
+/* ZUFS_OP_IOCTL */
+struct zufs_ioc_ioctl {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u32 cmd;
+	__u64 time;
+
+	/* OUT */
+	union {
+		__u32 new_size;
+		char arg[0];
+	};
 };
 
 /* ~~~~ io_map structures && IOCTL(s) ~~~~ */

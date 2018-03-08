@@ -46,6 +46,11 @@ bool zuf_dir_emit(struct super_block *sb, struct dir_context *ctx,
 uint zuf_prepare_symname(struct zufs_ioc_new_inode *ioc_new_inode,
 			const char *symname, ulong len, struct page *pages[2]);
 
+/* ioctl.c */
+long zuf_ioctl(struct file *filp, uint cmd, ulong arg);
+#ifdef CONFIG_COMPAT
+long zuf_compat_ioctl(struct file *file, uint cmd, ulong arg);
+#endif
 
 /* mmap.c */
 int zuf_file_mmap(struct file *file, struct vm_area_struct *vma);

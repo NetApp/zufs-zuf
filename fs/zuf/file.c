@@ -507,7 +507,11 @@ const struct file_operations zuf_file_operations = {
 	.fsync			= zuf_fsync,
 	.flush			= zuf_flush,
 	.release		= zuf_file_release,
+	.unlocked_ioctl		= zuf_ioctl,
 	.fallocate		= zuf_fallocate,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl		= zuf_compat_ioctl,
+#endif
 	.copy_file_range	= zuf_copy_file_range,
 	.remap_file_range	= zuf_clone_file_range,
 };

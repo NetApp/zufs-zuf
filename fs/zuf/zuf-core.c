@@ -787,6 +787,7 @@ const char *zuf_op_name(enum e_zufs_operation op)
 		CASE_ENUM_NAME(ZUFS_OP_SYNC		);
 		CASE_ENUM_NAME(ZUFS_OP_FALLOCATE	);
 		CASE_ENUM_NAME(ZUFS_OP_LLSEEK		);
+		CASE_ENUM_NAME(ZUFS_OP_IOCTL		);
 		CASE_ENUM_NAME(ZUFS_OP_BREAK		);
 	default:
 		return "UNKNOWN";
