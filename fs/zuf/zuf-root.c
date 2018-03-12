@@ -227,6 +227,7 @@ static void zufr_put_super(struct super_block *sb)
 {
 	struct zuf_root_info *zri = ZRI(sb);
 
+	zufc_zts_fini(zri);
 	_unregister_all_fses(zri);
 
 	zuf_info("zuf_root umount\n");
@@ -282,9 +283,15 @@ static int zufr_fill_super(struct super_block *sb, void *data, int silent)
 	root_i->i_fop = &zufr_file_dir_operations;
 	root_i->i_op = &zufr_inode_operations;
 
+	spin_lock_init(&zri->mount.lock);
 	mutex_init(&zri->sbl_lock);
+	relay_init(&zri->mount.relay);
 	INIT_LIST_HEAD(&zri->fst_list);
 	INIT_LIST_HEAD(&zri->pmem_list);
+
+	err = zufc_zts_init(zri);
+	if (unlikely(err))
+		return err; /* put will be called we have a root */
 
 	return 0;
 }

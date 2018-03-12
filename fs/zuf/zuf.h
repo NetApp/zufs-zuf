@@ -23,9 +23,11 @@
 #include <linux/xattr.h>
 #include <linux/exportfs.h>
 #include <linux/page_ref.h>
+#include <linux/mm.h>
 
 #include "zus_api.h"
 
+#include "relay.h"
 #include "_pr.h"
 
 enum zlfs_e_special_file {
@@ -44,6 +46,8 @@ struct zuf_special_file {
 struct zuf_root_info {
 	struct __mount_thread_info {
 		struct zuf_special_file zsf;
+		spinlock_t lock;
+		struct relay relay;
 		struct zufs_ioc_mount *zim;
 	} mount;
 
@@ -100,6 +104,48 @@ struct zuf_inode_info {
 static inline struct zuf_inode_info *ZUII(struct inode *inode)
 {
 	return container_of(inode, struct zuf_inode_info, vfs_inode);
+}
+
+static inline struct zuf_fs_type *ZUF_FST(struct file_system_type *fs_type)
+{
+	return container_of(fs_type, struct zuf_fs_type, vfs_fst);
+}
+
+static inline struct zuf_fs_type *zuf_fst(struct super_block *sb)
+{
+	return ZUF_FST(sb->s_type);
+}
+
+struct zuf_dispatch_op;
+typedef int (*overflow_handler)(struct zuf_dispatch_op *zdo, void *parg,
+				ulong zt_max_bytes);
+struct zuf_dispatch_op {
+	struct zufs_ioc_hdr *hdr;
+	struct page **pages;
+	uint nump;
+	overflow_handler oh;
+	struct super_block *sb;
+	struct inode *inode;
+};
+
+static inline void
+zuf_dispatch_init(struct zuf_dispatch_op *zdo, struct zufs_ioc_hdr *hdr,
+		 struct page **pages, uint nump)
+{
+	memset(zdo, 0, sizeof(*zdo));
+	zdo->hdr = hdr;
+	zdo->pages = pages; zdo->nump = nump;
+}
+
+static inline int zuf_flt_to_err(vm_fault_t flt)
+{
+	if (likely(flt == VM_FAULT_NOPAGE))
+		return 0;
+
+	if (flt == VM_FAULT_OOM)
+		return -ENOMEM;
+
+	return -EACCES;
 }
 
 /* Keep this include last thing in file */

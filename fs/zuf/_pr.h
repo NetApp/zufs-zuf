@@ -39,5 +39,9 @@
 
 /* ~~~ channel prints ~~~ */
 #define zuf_dbg_err(s, args ...)	zuf_chan_debug("error", s, ##args)
+#define zuf_dbg_vfs(s, args ...)	zuf_chan_debug("vfs  ", s, ##args)
+#define zuf_dbg_core(s, args ...)	zuf_chan_debug("core ", s, ##args)
+#define zuf_dbg_zus(s, args ...)	zuf_chan_debug("zusdg", s, ##args)
+#define zuf_dbg_verbose(s, args ...)	zuf_chan_debug("d-oto", s, ##args)
 
 #endif /* define __ZUF_PR_H__ */

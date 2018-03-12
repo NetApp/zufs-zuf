@@ -66,6 +66,47 @@
 
 #endif /*  ndef __KERNEL__ */
 
+/* first available error code after include/linux/errno.h */
+#define EZUFS_RETRY	531
+
+/* The below is private to zuf Kernel only. Is not exposed to VFS nor zus
+ * (defined here to allocate the constant)
+ */
+#define EZUF_RETRY_DONE 540
+
+/**
+ * zufs dual port memory
+ * This is a special type of offset to either memory or persistent-memory,
+ * that is designed to be used in the interface mechanism between userspace
+ * and kernel, and can be accessed by both.
+ * 3 first bits denote a mem-pool:
+ * 0   - pmem pool
+ * 1-6 - established shared pool by a call to zufs_ioc_create_mempool (below)
+ * 7   - offset into app memory
+ */
+typedef __u64 __bitwise zu_dpp_t;
+
+static inline uint zu_dpp_t_pool(zu_dpp_t t)
+{
+	return t & 0x7;
+}
+
+static inline ulong zu_dpp_t_val(zu_dpp_t t)
+{
+	return t & ~0x7;
+}
+
+static inline zu_dpp_t enc_zu_dpp_t(ulong v, uint pool)
+{
+	return v | pool;
+}
+
+/* ~~~~~ ZUFS API ioctl commands ~~~~~ */
+enum {
+	ZUS_API_MAP_MAX_PAGES	= 1024,
+	ZUS_API_MAP_MAX_SIZE	= ZUS_API_MAP_MAX_PAGES * PAGE_SIZE,
+};
+
 struct zufs_ioc_hdr {
 	__u32 err;	/* IN/OUT must be first */
 	__u16 in_len;	/* How much to be copied *to* zus */
@@ -101,5 +142,149 @@ struct zufs_ioc_register_fs {
 	} rfi;
 };
 #define ZU_IOC_REGISTER_FS	_IOWR('Z', 10, struct zufs_ioc_register_fs)
+
+/* A cookie from user-mode returned by mount */
+struct zus_sb_info;
+
+/* zus cookie per inode */
+struct zus_inode_info;
+
+enum ZUFS_M_FLAGS {
+	ZUFS_M_PEDANTIC		= 0x00000001,
+	ZUFS_M_EPHEMERAL	= 0x00000002,
+	ZUFS_M_SILENT		= 0x00000004,
+};
+
+struct zufs_parse_options {
+	__u32 mount_options_len;
+	__u32 pedantic;
+	__u64 mount_flags;
+	char mount_options[0];
+};
+
+enum e_mount_operation {
+	ZUFS_M_MOUNT	= 1,
+	ZUFS_M_UMOUNT,
+	ZUFS_M_REMOUNT,
+	ZUFS_M_DDBG_RD,
+	ZUFS_M_DDBG_WR,
+};
+
+struct zufs_mount_info {
+	/* IN */
+	struct zus_fs_info *zus_zfi;
+	__u16	num_cpu;
+	__u16	num_channels;
+	__u32	pmem_kern_id;
+	__u64	sb_id;
+
+	/* OUT */
+	struct zus_sb_info *zus_sbi;
+	/* mount is also iget of root */
+	struct zus_inode_info *zus_ii;
+	zu_dpp_t _zi;
+	__u64	old_mount_opt;
+	__u64	remount_flags;
+
+	/* More FS specific info */
+	__u32 s_blocksize_bits;
+	__u8	acl_on;
+	struct zufs_parse_options po;
+};
+
+/* mount / umount */
+struct  zufs_ioc_mount {
+	struct zufs_ioc_hdr hdr;
+	struct zufs_mount_info zmi;
+};
+#define ZU_IOC_MOUNT	_IOWR('Z', 11, struct zufs_ioc_mount)
+
+/* pmem  */
+struct zufs_ioc_numa_map {
+	/* Set by zus */
+	struct zufs_ioc_hdr hdr;
+
+	__u32	possible_nodes;
+	__u32	possible_cpus;
+	__u32	online_nodes;
+	__u32	online_cpus;
+
+	__u32	max_cpu_per_node;
+
+	/* This indicates that NOT all nodes have @max_cpu_per_node cpus */
+	bool	nodes_not_symmetrical;
+
+	/* Variable size must keep last
+	 * size @online_cpus
+	 */
+	__u8	cpu_to_node[];
+};
+#define ZU_IOC_NUMA_MAP	_IOWR('Z', 12, struct zufs_ioc_numa_map)
+
+/* ZT init */
+enum { ZUFS_MAX_ZT_CHANNELS = 64 };
+
+struct zufs_ioc_init {
+	struct zufs_ioc_hdr hdr;
+	ulong affinity;	/* IN */
+	uint channel_no;
+	uint max_command;
+};
+#define ZU_IOC_INIT_THREAD	_IOWR('Z', 14, struct zufs_ioc_init)
+
+/* break_all (Server telling kernel to clean) */
+struct zufs_ioc_break_all {
+	struct zufs_ioc_hdr hdr;
+};
+#define ZU_IOC_BREAK_ALL	_IOWR('Z', 15, struct zufs_ioc_break_all)
+
+/* ~~~  zufs_ioc_wait_operation ~~~ */
+struct zufs_ioc_wait_operation {
+	struct zufs_ioc_hdr hdr;
+	/* maximum size is governed by zufs_ioc_init->max_command */
+	char opt_buff[];
+};
+#define ZU_IOC_WAIT_OPT		_IOWR('Z', 16, struct zufs_ioc_wait_operation)
+
+/* These are the possible operations sent from Kernel to the Server in the
+ * return of the ZU_IOC_WAIT_OPT.
+ */
+enum e_zufs_operation {
+	ZUFS_OP_NULL = 0,
+
+	ZUFS_OP_BREAK,		/* Kernel telling Server to exit */
+	ZUFS_OP_MAX_OPT,
+};
+
+/* Allocate a special_file that will be a dual-port communication buffer with
+ * user mode.
+ * Server will access the buffer via the mmap of this file.
+ * Kernel will access the file via the valloc() pointer
+ *
+ * Some IOCTLs below demand use of this kind of buffer for communication
+ * TODO:
+ * pool_no is if we want to associate this buffer onto the 6 possible
+ * mem-pools per zuf_sbi. So anywhere we have a zu_dpp_t it will mean
+ * access from this pool.
+ * If pool_no is zero then it is private to only this file. In this case
+ * sb_id && zus_sbi are ignored / not needed.
+ */
+struct zufs_ioc_alloc_buffer {
+	struct zufs_ioc_hdr hdr;
+	/* The ID of the super block received in mount */
+	__u64	sb_id;
+	/* We verify the sb_id validity against zus_sbi */
+	struct zus_sb_info *zus_sbi;
+	/* max size of buffer allowed (size of mmap) */
+	__u32 max_size;
+	/* allocate this much on initial call and set into vma */
+	__u32 init_size;
+
+	/* TODO: These below are now set to ZERO. Need implementation */
+	__u16 pool_no;
+	__u16 flags;
+	__u32 reserved;
+};
+#define ZU_IOC_ALLOC_BUFFER	_IOWR('Z', 17, struct zufs_ioc_init)
 
 #endif /* _LINUX_ZUFS_API_H */
