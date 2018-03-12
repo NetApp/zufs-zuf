@@ -10,5 +10,9 @@
 
 obj-$(CONFIG_ZUF) += zuf.o
 
+# ZUF core
+zuf-y += zuf-core.o zuf-root.o
+
 # Main FS
+zuf-y += super.o
 zuf-y += module.o
