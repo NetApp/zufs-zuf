@@ -22,6 +22,8 @@
 #include <linux/fiemap.h>
 #include <stddef.h>
 
+#include "md_def.h"
+
 #ifdef __cplusplus
 #define NAMELESS(X) X
 #else
@@ -354,6 +356,19 @@ struct zufs_ioc_numa_map {
 	struct zufs_cpu_set cpu_set_per_node[];
 };
 #define ZU_IOC_NUMA_MAP	_IOWR('Z', 13, struct zufs_ioc_numa_map)
+
+struct zufs_ioc_pmem {
+	/* Set by zus */
+	struct zufs_ioc_hdr hdr;
+	__u64 sb_id;
+
+	/* Returned to zus */
+	struct md_dev_table mdt;
+	__u32 dev_index;
+	__u32 ___pad;
+};
+/* GRAB is never ungrabed umount or file close cleans it all */
+#define ZU_IOC_GRAB_PMEM	_IOWR('Z', 14, struct zufs_ioc_pmem)
 
 /* ZT init */
 enum { ZUFS_MAX_ZT_CHANNELS = 4 };
