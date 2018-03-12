@@ -40,8 +40,19 @@
 /* ~~~ channel prints ~~~ */
 #define zuf_dbg_err(s, args ...)	zuf_chan_debug("error", s, ##args)
 #define zuf_dbg_vfs(s, args ...)	zuf_chan_debug("vfs  ", s, ##args)
+#define zuf_dbg_t1(s, args ...)		zuf_chan_debug("t1   ", s, ##args)
+#define zuf_dbg_t2(s, args ...)		zuf_chan_debug("t2dbg", s, ##args)
+#define zuf_dbg_t2_rw(s, args ...)	zuf_chan_debug("t2grw", s, ##args)
 #define zuf_dbg_core(s, args ...)	zuf_chan_debug("core ", s, ##args)
 #define zuf_dbg_zus(s, args ...)	zuf_chan_debug("zusdg", s, ##args)
 #define zuf_dbg_verbose(s, args ...)	zuf_chan_debug("d-oto", s, ##args)
+
+#define md_err		zuf_err
+#define md_warn		zuf_warn
+#define md_err_cnd	zuf_err_cnd
+#define md_warn_cnd	zuf_warn_cnd
+#define md_dbg_err	zuf_dbg_err
+#define md_dbg_verbose	zuf_dbg_verbose
+
 
 #endif /* define __ZUF_PR_H__ */

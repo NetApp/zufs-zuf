@@ -57,4 +57,7 @@ int zufc_dispatch(struct zuf_root_info *zri, struct zufs_ioc_hdr *hdr,
 /* zuf-root.c */
 int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs);
 
+/* t1.c */
+int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);
+
 #endif	/*ndef __ZUF_EXTERN_H__*/

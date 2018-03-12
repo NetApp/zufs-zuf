@@ -29,6 +29,8 @@
 
 #include "relay.h"
 #include "_pr.h"
+#include "md.h"
+#include "t2.h"
 
 enum zlfs_e_special_file {
 	zlfs_e_zt = 1,
@@ -40,6 +42,14 @@ enum zlfs_e_special_file {
 struct zuf_special_file {
 	enum zlfs_e_special_file type;
 	struct file *file;
+};
+
+/* Our special md structure */
+struct zuf_pmem {
+	struct multi_devices md; /* must be first */
+	struct list_head list;
+	struct zuf_special_file hdr;
+	uint pmem_id;
 };
 
 /* This is the zuf-root.c mini filesystem */
@@ -93,6 +103,35 @@ static inline void zuf_add_fs_type(struct zuf_root_info *zri,
 	/* Unlocked for now only one mount-thread with zus */
 	list_add(&zft->list, &zri->fst_list);
 }
+
+static inline void zuf_add_pmem(struct zuf_root_info *zri,
+				   struct multi_devices *md)
+{
+	struct zuf_pmem *z_pmem = (void *)md;
+
+	z_pmem->pmem_id = ++zri->next_pmem_id; /* Avoid 0 id */
+
+	/* Unlocked for now only one mount-thread with zus */
+	INIT_LIST_HEAD(&z_pmem->list);
+	list_add(&z_pmem->list, &zri->pmem_list);
+}
+
+static inline void zuf_rm_pmem(struct multi_devices *md)
+{
+	struct zuf_pmem *z_pmem = (void *)md;
+
+	if (z_pmem->pmem_id) /* We avoided 0 id */
+		list_del_init(&z_pmem->list);
+}
+
+static inline uint zuf_pmem_id(struct multi_devices *md)
+{
+	struct zuf_pmem *z_pmem = container_of(md, struct zuf_pmem, md);
+
+	return z_pmem->pmem_id;
+}
+
+// void zuf_del_fs_type(struct zuf_root_info *zri, struct zuf_fs_type *zft);
 
 /*
  * ZUF per-inode data in memory

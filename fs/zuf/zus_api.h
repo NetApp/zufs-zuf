@@ -19,6 +19,8 @@
 #include <stddef.h>
 #include <linux/statfs.h>
 
+#include "md_def.h"
+
 /*
  * Version rules:
  *   This is the zus-to-zuf API version. And not the Filesystem
@@ -73,6 +75,10 @@
  * (defined here to allocate the constant)
  */
 #define EZUF_RETRY_DONE 540
+
+
+/* All device sizes offsets must align on 2M */
+#define ZUFS_ALLOC_MASK		(1024 * 1024 * 2 - 1)
 
 /**
  * zufs dual port memory
@@ -220,6 +226,18 @@ struct zufs_ioc_numa_map {
 	__u8	cpu_to_node[];
 };
 #define ZU_IOC_NUMA_MAP	_IOWR('Z', 12, struct zufs_ioc_numa_map)
+
+struct zufs_ioc_pmem {
+	/* Set by zus */
+	struct zufs_ioc_hdr hdr;
+	__u32 pmem_kern_id;
+
+	/* Returned to zus */
+	struct md_dev_table mdt;
+
+};
+/* GRAB is never ungrabed umount or file close cleans it all */
+#define ZU_IOC_GRAB_PMEM	_IOWR('Z', 13, struct zufs_ioc_pmem)
 
 /* ZT init */
 enum { ZUFS_MAX_ZT_CHANNELS = 64 };
