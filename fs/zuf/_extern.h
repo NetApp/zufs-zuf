@@ -54,4 +54,10 @@ void zuf_destroy_inodecache(void);
 struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 			 const char *dev_name, void *data);
 
+struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
+				   struct zus_sb_info *zus_sbi);
+
+/* t1.c */
+int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);
+
 #endif	/*ndef __ZUF_EXTERN_H__*/

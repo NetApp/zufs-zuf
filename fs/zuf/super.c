@@ -20,6 +20,12 @@
 
 static struct kmem_cache *zuf_inode_cachep;
 
+struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
+				   struct zus_sb_info *zus_sbi)
+{
+	return NULL;
+}
+
 static void _init_once(void *foo)
 {
 	struct zuf_inode_info *zii = foo;
