@@ -27,6 +27,22 @@ void zufc_zts_fini(struct zuf_root_info *zri);
 long zufc_ioctl(struct file *filp, unsigned int cmd, ulong arg);
 int zufc_release(struct inode *inode, struct file *file);
 int zufc_mmap(struct file *file, struct vm_area_struct *vma);
+const char *zuf_op_name(enum e_zufs_operation op);
+
+int zufc_dispatch_mount(struct zuf_root_info *zri, struct zus_fs_info *zus_zfi,
+			enum e_mount_operation operation,
+			struct zufs_ioc_mount *zim);
+
+int __zufc_dispatch(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo);
+static inline
+int zufc_dispatch(struct zuf_root_info *zri, struct zufs_ioc_hdr *hdr,
+		  struct page **pages, uint nump)
+{
+	struct zuf_dispatch_op zdo;
+
+	zuf_dispatch_init(&zdo, hdr, pages, nump);
+	return __zufc_dispatch(zri, &zdo);
+}
 
 /* zuf-root.c */
 int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs);

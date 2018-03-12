@@ -110,6 +110,47 @@ static inline struct zuf_inode_info *ZUII(struct inode *inode)
 	return container_of(inode, struct zuf_inode_info, vfs_inode);
 }
 
+struct zuf_dispatch_op;
+typedef int (*overflow_handler)(struct zuf_dispatch_op *zdo, void *parg,
+				ulong zt_max_bytes);
+typedef void (*dispatch_handler)(struct zuf_dispatch_op *zdo, void *pzt,
+				void *parg);
+struct zuf_dispatch_op {
+	struct zufs_ioc_hdr *hdr;
+	union {
+		struct page **pages;
+		ulong *bns;
+	};
+	uint nump;
+	overflow_handler oh;
+	dispatch_handler dh;
+	struct super_block *sb;
+	struct inode *inode;
+
+	/* Don't touch zuf-core only!!! */
+	struct zufc_thread *__locked_zt;
+};
+
+static inline void
+zuf_dispatch_init(struct zuf_dispatch_op *zdo, struct zufs_ioc_hdr *hdr,
+		 struct page **pages, uint nump)
+{
+	memset(zdo, 0, sizeof(*zdo));
+	zdo->hdr = hdr;
+	zdo->pages = pages; zdo->nump = nump;
+}
+
+static inline int zuf_flt_to_err(vm_fault_t flt)
+{
+	if (likely(flt == VM_FAULT_NOPAGE))
+		return 0;
+
+	if (flt == VM_FAULT_OOM)
+		return -ENOMEM;
+
+	return -EACCES;
+}
+
 /* Keep this include last thing in file */
 #include "_extern.h"
 
