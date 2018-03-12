@@ -93,4 +93,40 @@
 
 #endif /*  ndef __KERNEL__ */
 
+struct zufs_ioc_hdr {
+	__s32 err;	/* IN/OUT must be first */
+	__u16 in_len;	/* How much to be copied *to* zus */
+	__u16 out_max;	/* Max receive buffer at dispatch caller */
+	__u16 out_start;/* Start of output parameters (to caller) */
+	__u16 out_len;	/* How much to be copied *from* zus to caller */
+			/* can be modified by zus */
+	__u16 operation;/* One of e_zufs_operation */
+	__u16 flags;	/* e_zufs_hdr_flags bit flags */
+	__u32 offset;	/* Start of user buffer in ZT mmap */
+	__u32 len;	/* Len of user buffer in ZT mmap */
+};
+
+struct register_fs_info {
+	char fsname[16];	/* Only 4 chars and a NUL please      */
+	__u32 FS_magic;         /* This is the FS's version && magic  */
+	__u32 FS_ver_major;	/* on disk, not the zuf-to-zus version*/
+	__u32 FS_ver_minor;	/* (See also struct md_dev_table)   */
+	__u32 notused;
+
+	__u64 dt_offset;
+	__u64 s_maxbytes;
+	__u32 s_time_gran;
+	__u32 def_mode;
+};
+
+/* Register FS */
+/* A cookie from user-mode given in register_fs_info */
+struct zus_fs_info;
+struct zufs_ioc_register_fs {
+	struct zufs_ioc_hdr hdr;
+	struct zus_fs_info *zus_zfi;
+	struct register_fs_info rfi;
+};
+#define ZU_IOC_REGISTER_FS	_IOWR('Z', 10, struct zufs_ioc_register_fs)
+
 #endif /* _LINUX_ZUFS_API_H */
