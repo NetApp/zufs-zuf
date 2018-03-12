@@ -10,6 +10,9 @@
 
 obj-$(CONFIG_ZUFS_FS) += zuf.o
 
+# Infrastructure
+zuf-y += md.o t1.o t2.o
+
 # ZUF core
 zuf-y += zuf-core.o zuf-root.o
 

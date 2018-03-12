@@ -28,6 +28,8 @@
 #include "zus_api.h"
 
 #include "_pr.h"
+#include "md.h"
+#include "t2.h"
 
 enum zlfs_e_special_file {
 	zlfs_e_zt = 1,
@@ -98,6 +100,13 @@ static inline void zuf_add_fs_type(struct zuf_root_info *zri,
 	list_add(&zft->list, &zri->fst_list);
 }
 
+/* t1.c special file to mmap our pmem */
+struct zuf_pmem_file {
+	struct zuf_special_file hdr;
+	struct multi_devices *md;
+};
+
+
 /*
  * ZUF per-inode data in memory
  */
@@ -108,6 +117,51 @@ struct zuf_inode_info {
 static inline struct zuf_inode_info *ZUII(struct inode *inode)
 {
 	return container_of(inode, struct zuf_inode_info, vfs_inode);
+}
+
+/*
+ * ZUF super-block data in memory
+ */
+struct zuf_sb_info {
+	struct super_block *sb;
+	struct multi_devices *md;
+	struct zuf_pmem_file pmem;
+
+	/* zus cookie*/
+	struct zus_sb_info *zus_sbi;
+
+	/* Mount options */
+	unsigned long	s_mount_opt;
+	ulong		fs_caps;
+	char		*pmount_dev; /* for private mount */
+
+	spinlock_t		s_mmap_dirty_lock;
+	struct list_head	s_mmap_dirty;
+};
+
+static inline struct zuf_sb_info *SBI(struct super_block *sb)
+{
+	return sb->s_fs_info;
+}
+
+static inline struct zuf_fs_type *ZUF_FST(struct file_system_type *fs_type)
+{
+	return container_of(fs_type, struct zuf_fs_type, vfs_fst);
+}
+
+static inline struct zuf_fs_type *zuf_fst(struct super_block *sb)
+{
+	return ZUF_FST(sb->s_type);
+}
+
+static inline struct zuf_root_info *ZUF_ROOT(struct zuf_sb_info *sbi)
+{
+	return zuf_fst(sbi->sb)->zri;
+}
+
+static inline bool zuf_rdonly(struct super_block *sb)
+{
+	return sb_rdonly(sb);
 }
 
 struct zuf_dispatch_op;

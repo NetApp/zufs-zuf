@@ -359,6 +359,78 @@ out:
 	return err;
 }
 
+/* ~~~~ PMEM GRAB ~~~~ */
+/*FIXME: At pmem the struct md_dev_list for t1(s) is not properly set
+ * For now we do not fix it and re-write the mdt. So just fix the one
+ * we are about to send to Server
+ */
+static void _fix_numa_ids(struct multi_devices *md, struct md_dev_list *mdl)
+{
+	int i;
+
+	for (i = 0; i < md->t1_count; ++i)
+		if (md->devs[i].nid != __dev_id_nid(&mdl->dev_ids[i]))
+			__dev_id_nid_set(&mdl->dev_ids[i], md->devs[i].nid);
+}
+
+static int _zu_grab_pmem(struct file *file, void *parg)
+{
+	struct zuf_root_info *zri = ZRI(file->f_inode->i_sb);
+	struct zufs_ioc_pmem __user *arg_pmem = parg;
+	struct zufs_ioc_pmem *zi_pmem = kzalloc(sizeof(*zi_pmem), GFP_KERNEL);
+	struct super_block *sb;
+	struct zuf_sb_info *sbi;
+	size_t pmem_size;
+	int err;
+
+	if (unlikely(!zi_pmem))
+		return -ENOMEM;
+
+	err = get_user(zi_pmem->sb_id, &arg_pmem->sb_id);
+	if (err) {
+		zuf_err("\n");
+		goto out;
+	}
+
+	sb = zuf_sb_from_id(zri, zi_pmem->sb_id, NULL);
+	if (unlikely(!sb)) {
+		err = -ENODEV;
+		zuf_err("!!! pmem_kern_id=%llu not found\n", zi_pmem->sb_id);
+		goto out;
+	}
+	sbi = SBI(sb);
+
+	if (sbi->pmem.hdr.file) {
+		zuf_err("[%llu] pmem already taken\n", zi_pmem->sb_id);
+		err = -EIO;
+		goto out;
+	}
+
+	memcpy(&zi_pmem->mdt, md_zdt(sbi->md), sizeof(zi_pmem->mdt));
+	zi_pmem->dev_index = sbi->md->dev_index;
+	_fix_numa_ids(sbi->md, &zi_pmem->mdt.s_dev_list);
+
+	pmem_size = md_p2o(md_t1_blocks(sbi->md));
+	if (mdt_test_option(md_zdt(sbi->md), MDT_F_SHADOW))
+		pmem_size += pmem_size;
+	i_size_write(file->f_inode, pmem_size);
+	sbi->pmem.hdr.type = zlfs_e_pmem;
+	sbi->pmem.hdr.file = file;
+	sbi->pmem.md = sbi->md; /* FIXME: Use container_of in t1.c */
+	file->private_data = &sbi->pmem.hdr;
+	zuf_dbg_core("pmem %llu i_size=0x%llx GRABED %s\n",
+		     zi_pmem->sb_id, i_size_read(file->f_inode),
+		     _bdev_name(md_t1_dev(sbi->md, 0)->bdev));
+
+out:
+	zi_pmem->hdr.err = err;
+	err = copy_to_user(parg, zi_pmem, sizeof(*zi_pmem));
+	if (err)
+		zuf_err("=>%d\n", err);
+	kfree(zi_pmem);
+	return err;
+}
+
 static void _prep_header_size_op(struct zufs_ioc_hdr *hdr,
 				 enum e_zufs_operation op, int err)
 {
@@ -886,6 +958,8 @@ long zufc_ioctl(struct file *file, unsigned int cmd, ulong arg)
 		return _zu_mount(file, parg);
 	case ZU_IOC_NUMA_MAP:
 		return _zu_numa_map(file, parg);
+	case ZU_IOC_GRAB_PMEM:
+		return _zu_grab_pmem(file, parg);
 	case ZU_IOC_INIT_THREAD:
 		return _zu_init(file, parg);
 	case ZU_IOC_WAIT_OPT:
@@ -1135,6 +1209,8 @@ int zufc_mmap(struct file *file, struct vm_area_struct *vma)
 	switch (zsf->type) {
 	case zlfs_e_zt:
 		return zufc_zt_mmap(file, vma);
+	case zlfs_e_pmem:
+		return zuf_pmem_mmap(file, vma);
 	case zlfs_e_dpp_buff:
 		return zufc_ebuff_mmap(file, vma);
 	default:
