@@ -38,6 +38,40 @@ static inline int _compat_generic_write_checks(struct kiocb *kiocb,
 				    &ii->count, 0);
 }
 
+typedef int vm_fault_t;
+
+static inline
+int vm_fault_t_return(int err)
+{
+	if (err == 0 || err == -EBUSY)
+		return VM_FAULT_NOPAGE;
+	if (err == -ENOMEM)
+		return VM_FAULT_OOM;
+	return VM_FAULT_SIGBUS;
+}
+
+static inline
+vm_fault_t vmf_insert_mixed(struct vm_area_struct *vma, unsigned long addr,
+			pfn_t pfn)
+{
+	int err;
+
+	err = vm_insert_mixed(vma, addr, pfn);
+
+	return vm_fault_t_return(err);
+}
+
+static inline
+vm_fault_t vmf_insert_mixed_mkwrite(struct vm_area_struct *vma,
+		unsigned long addr, pfn_t pfn)
+{
+	int err;
+
+	err = vm_insert_mixed(vma, addr, pfn);
+
+	return vm_fault_t_return(err);
+}
+
 #define __posix_acl_create posix_acl_create
 #define posix_acl_valid(ns, acl) posix_acl_valid(acl)
 

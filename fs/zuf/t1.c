@@ -33,7 +33,7 @@ static vm_fault_t t1_fault(struct vm_fault *vmf, enum page_entry_size pe_size)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct inode *inode = vma->vm_file->f_mapping->host;
-	ulong addr = vmf->address;
+	ulong addr = (ulong)vmf->virtual_address;
 	struct zuf_pmem *z_pmem;
 	pgoff_t size;
 	ulong bn;
@@ -106,8 +106,9 @@ static vm_fault_t t1_fault(struct vm_fault *vmf, enum page_entry_size pe_size)
 	return flt;
 }
 
-static vm_fault_t t1_fault_pte(struct vm_fault *vmf)
+static vm_fault_t t1_fault_pte(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
+	WARN_ON(vma != vmf->vma);
 	return t1_fault(vmf, PE_SIZE_PTE);
 }
 
@@ -124,6 +125,8 @@ int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EPERM;
 
 	vma->vm_flags |= VM_HUGEPAGE;
+	vma->vm_flags |= VM_MIXEDMAP; /* for RDMA */
+	vma->vm_flags2 |= VM_HUGE_FAULT;
 	vma->vm_ops = &t1_vm_ops;
 
 	zuf_dbg_vfs("[%ld] start=0x%lx end=0x%lx flags=0x%lx page_prot=0x%lx\n",
