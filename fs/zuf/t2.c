@@ -90,11 +90,6 @@ static inline bool _err_set_reported(struct md_dev_info *mdi, bool write)
 	return false;
 }
 
-static int _status_to_errno(blk_status_t status)
-{
-	return -EIO;
-}
-
 void t2_io_done(struct t2_io_state *tis, struct bio *bio, bool last)
 {
 	struct bio_vec *bv;
@@ -107,21 +102,21 @@ void t2_io_done(struct t2_io_state *tis, struct bio *bio, bool last)
 		put_page(bv->bv_page);
 }
 
-static void _tis_bio_done(struct bio *bio)
+static void _tis_bio_done(struct bio *bio, int err)
 {
 	struct t2_io_state *tis = bio->bi_private;
 	struct md_dev_info *mdi = md_t2_dev(tis->md, 0);
 
-	t2_tis_dbg(tis, "done=%pS err=%d\n", tis->done, bio->bi_status);
+	t2_tis_dbg(tis, "done=%pS err=%d\n", tis->done, err);
 
-	if (unlikely(bio->bi_status)) {
+	if (unlikely(err)) {
 		zuf_dbg_err("%s: err=%d last-err=%d\n",
-			     _pr_rw(tis->rw_flags), bio->bi_status, tis->err);
+			     _pr_rw(tis->rw_flags), err, tis->err);
 		if (_err_set_reported(mdi, 0 != (tis->rw_flags & WRITE)))
 			zuf_err("%s: err=%d\n",
-				 _pr_rw(tis->rw_flags), bio->bi_status);
+				 _pr_rw(tis->rw_flags), err);
 		/* Store the last one */
-		tis->err = _status_to_errno(bio->bi_status);
+		tis->err = err;
 	} else if (unlikely(mdi->t2i.err_write_reported ||
 			    mdi->t2i.err_read_reported)) {
 		if (tis->rw_flags & WRITE)
@@ -156,14 +151,14 @@ static void _tis_submit_bio(struct t2_io_state *tis, bool flush, bool done)
 
 			bio_list_for_each_safe(bio, btmp, &tis->delayed_bios) {
 				bio->bi_next = NULL;
-				if (bio->bi_iter.bi_sector == -1) {
+				if (bio->bi_sector == -1) {
 					t2_warn("!!!!!!!!!!!!!\n");
 					bio_put(bio);
 					continue;
 				}
 				t2_tis_dbg(tis, "submit bio[%d] max_v=%d\n",
 					    bio->bi_vcnt, tis->n_vects);
-				submit_bio(bio);
+				submit_bio(tis->rw_flags & WRITE, bio);
 			}
 			bio_list_init(&tis->delayed_bios);
 		}
@@ -171,10 +166,10 @@ static void _tis_submit_bio(struct t2_io_state *tis, bool flush, bool done)
 		if (!tis->cur_bio)
 			return;
 
-		if (tis->cur_bio->bi_iter.bi_sector != -1) {
+		if (tis->cur_bio->bi_sector != -1) {
 			t2_tis_dbg(tis, "submit bio[%d] max_v=%d\n",
 				    tis->cur_bio->bi_vcnt, tis->n_vects);
-			submit_bio(tis->cur_bio);
+			submit_bio(tis->rw_flags & WRITE, tis->cur_bio);
 			tis->cur_bio = NULL;
 			tis->index = ~0;
 		} else if (done) {
@@ -182,7 +177,7 @@ static void _tis_submit_bio(struct t2_io_state *tis, bool flush, bool done)
 			bio_put(tis->cur_bio);
 			WARN_ON(tis_put(tis));
 		}
-	} else if (tis->cur_bio && (tis->cur_bio->bi_iter.bi_sector != -1)) {
+	} else if (tis->cur_bio && (tis->cur_bio->bi_sector != -1)) {
 		/* Not flushing regular progress */
 		if (_tis_delay(tis)) {
 			t2_tis_dbg(tis, "list_add cur_bio=%p\n", tis->cur_bio);
@@ -190,7 +185,7 @@ static void _tis_submit_bio(struct t2_io_state *tis, bool flush, bool done)
 		} else {
 			t2_tis_dbg(tis, "submit bio[%d] max_v=%d\n",
 				    tis->cur_bio->bi_vcnt, tis->n_vects);
-			submit_bio(tis->cur_bio);
+			submit_bio(tis->rw_flags & WRITE, tis->cur_bio);
 		}
 		tis->cur_bio = NULL;
 		tis->index = ~0;
@@ -202,7 +197,6 @@ static void _tis_alloc(struct t2_io_state *tis, struct md_dev_info *mdi,
 		       gfp_t gfp)
 {
 	struct bio *bio = bio_alloc(gfp, tis->n_vects);
-	int bio_op;
 
 	if (unlikely(!bio)) {
 		if (!_tis_delay(tis))
@@ -216,18 +210,12 @@ static void _tis_alloc(struct t2_io_state *tis, struct md_dev_info *mdi,
 		return;
 	}
 
-	/* FIXME: bio_set_op_attrs macro has a BUG which does not allow this
-	 * question inline.
-	 */
-	bio_op = (tis->rw_flags & WRITE) ? REQ_OP_WRITE : REQ_OP_READ;
-	bio_set_op_attrs(bio, bio_op, 0);
-
-	bio->bi_iter.bi_sector = -1;
+	bio->bi_sector = -1;
 	bio->bi_end_io = _tis_bio_done;
 	bio->bi_private = tis;
 
 	if (mdi) {
-		bio_set_dev(bio, mdi->bdev);
+		bio->bi_bdev = mdi->bdev;
 		tis->index = mdi->index;
 	} else {
 		tis->index = ~0;
@@ -286,12 +274,12 @@ start:
 		}
 	} else if (tis->index == ~0) {
 		/* the bio was allocated during t2_io_prealloc */
+		tis->cur_bio->bi_bdev = mdi->bdev;
 		tis->index = mdi->index;
-		bio_set_dev(tis->cur_bio, mdi->bdev);
 	}
 
 	if (tis->last_t2 == -1)
-		tis->cur_bio->bi_iter.bi_sector = local_t2 * T2_SECTORS_PER_PAGE;
+		tis->cur_bio->bi_sector = local_t2 * T2_SECTORS_PER_PAGE;
 
 	ret = bio_add_page(tis->cur_bio, page, PAGE_SIZE, 0);
 	if (unlikely(ret != PAGE_SIZE)) {
@@ -308,6 +296,16 @@ start:
 		   t2, tis->last_t2, local_t2, md_page_to_bn(tis->md, page));
 
 	tis->last_t2 = local_t2;
+	return 0;
+}
+
+/*
+ * wait_on_atomic_t() do nothing @action function.
+ * (TODO: Do I need to check for TASK_INTERRUPTIBLE events myself)
+ */
+static int _tis_wait_atomic_t(atomic_t *p)
+{
+	schedule();
 	return 0;
 }
 
@@ -328,7 +326,7 @@ int t2_io_end(struct t2_io_state *tis, bool wait)
 	if (wait) {
 		int err;
 
-		err = wait_on_atomic_t(&tis->refcount, atomic_t_wait,
+		err = wait_on_atomic_t(&tis->refcount, _tis_wait_atomic_t,
 					TASK_UNINTERRUPTIBLE);
 		if (unlikely(err))
 			zuf_err("UNINTERRUPTIBLE wait error =>%d\n", err);
@@ -355,7 +353,7 @@ static int _sync_io_page(struct multi_devices *md, int rw, ulong bn,
 	if (unlikely(err))
 		return err;
 
-	err = submit_bio_wait(tis.cur_bio);
+	err = submit_bio_wait(rw, tis.cur_bio);
 	if (unlikely(err)) {
 		SetPageError(page);
 		/*
