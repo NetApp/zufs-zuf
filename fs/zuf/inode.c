@@ -567,7 +567,7 @@ int zuf_setattr(struct dentry *dentry, struct iattr *attr)
 		ioc_attr.zuf_attr |= STATX_SIZE;
 
 		ZUF_CHECK_I_W_LOCK(inode);
-		zuf_smw_lock(zii);
+		zuf_w_lock(zii);
 
 		if (attr->ia_size < inode->i_size) {
 			/* Make all mmap() users FAULT for truncated pages */
@@ -615,7 +615,7 @@ int zuf_setattr(struct dentry *dentry, struct iattr *attr)
 		i_size_write(inode, le64_to_cpu(zi->i_size));
 		inode->i_blocks = le64_to_cpu(zi->i_blocks);
 
-		zuf_smw_unlock(zii);
+		zuf_w_unlock(zii);
 	}
 
 	return err;

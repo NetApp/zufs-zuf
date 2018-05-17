@@ -172,6 +172,7 @@ struct zuf_inode_info {
 	struct list_head	i_mmap_dirty;
 	atomic_t		write_mapped;
 	atomic_t		vma_count;
+	struct rw_semaphore	rw_lock;
 
 	/* cookies from Server */
 	struct zus_inode	*zi;
@@ -257,11 +258,11 @@ static inline void timespec_to_mt(__le64 *mt, struct timespec *t)
 
 static inline void zuf_r_lock(struct zuf_inode_info *zii)
 {
-	inode_lock_shared(&zii->vfs_inode);
+	down_read_nested(&zii->rw_lock, 1);
 }
 static inline void zuf_r_unlock(struct zuf_inode_info *zii)
 {
-	inode_unlock_shared(&zii->vfs_inode);
+	up_read(&zii->rw_lock);
 }
 
 static inline void zuf_smr_lock(struct zuf_inode_info *zii)
@@ -292,25 +293,25 @@ static inline void zuf_smw_unlock(struct zuf_inode_info *zii)
 
 static inline void zuf_w_lock(struct zuf_inode_info *zii)
 {
-	inode_lock(&zii->vfs_inode);
+	down_write(&zii->rw_lock);
 	zuf_smw_lock(zii);
 }
 static inline void zuf_w_lock_nested(struct zuf_inode_info *zii)
 {
-	inode_lock_nested(&zii->vfs_inode, 2);
+	down_write_nested(&zii->rw_lock, 2);
 	zuf_smw_lock_nested(zii);
 }
 static inline void zuf_w_unlock(struct zuf_inode_info *zii)
 {
 	zuf_smw_unlock(zii);
-	inode_unlock(&zii->vfs_inode);
+	up_write(&zii->rw_lock);
 }
 
 static inline void ZUF_CHECK_I_W_LOCK(struct inode *inode)
 {
 #ifdef CONFIG_ZUF_DEBUG
-	if (WARN_ON(down_write_trylock(&inode->i_rwsem)))
-		up_write(&inode->i_rwsem);
+	if (WARN_ON(down_write_trylock(&ZUII(inode)->rw_lock)))
+		up_write(&ZUII(inode)->rw_lock);
 #endif
 }
 

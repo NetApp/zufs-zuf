@@ -856,6 +856,7 @@ static void _init_once(void *foo)
 	zii->zi = NULL;
 	init_rwsem(&zii->xa_rwsem);
 	init_rwsem(&zii->in_sync);
+	init_rwsem(&zii->rw_lock);
 	atomic_set(&zii->vma_count, 0);
 	atomic_set(&zii->write_mapped, 0);
 }
