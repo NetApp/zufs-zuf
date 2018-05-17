@@ -260,7 +260,7 @@ static int zuf_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
 
-	inode->i_op = zuf_dir_inode_ops();
+	zuf_set_inode_ops(inode, &zuf_dir_inode_operations);
 	inode->i_fop = &zuf_dir_operations;
 	inode->i_mapping->a_ops = &zuf_aops;
 
@@ -417,9 +417,11 @@ static int zuf_rename_old(struct inode *old_dir, struct dentry *old_dentry,
 #ifdef BACKPORT_INODE_OPS_WRAPPER
 const struct inode_operations_wrapper zuf_dir_inode_operations = {
 	.rename2	= zuf_rename,
+	.tmpfile	= zuf_tmpfile,
 	.ops = {
 #else
 const struct inode_operations zuf_dir_inode_operations = {
+	.tmpfile	= zuf_tmpfile,
 #endif /* BACKPORT_INODE_OPS_WRAPPER */
 
 	.create		= zuf_create,
@@ -430,7 +432,6 @@ const struct inode_operations zuf_dir_inode_operations = {
 	.mkdir		= zuf_mkdir,
 	.rmdir		= zuf_rmdir,
 	.mknod		= zuf_mknod,
-	.tmpfile	= zuf_tmpfile,
 #ifdef BACKPORT_OLD_RENAME
 	.rename		= zuf_rename_old,
 #else

@@ -167,6 +167,7 @@ int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs)
 	zft->vfs_fst.name	= kstrdup(rfs->rfi.fsname, GFP_KERNEL);
 	zft->vfs_fst.mount	= zuf_mount;
 	zft->vfs_fst.kill_sb	= kill_block_super;
+	zft->vfs_fst.fs_flags	= FS_HAS_FO_EXTEND;
 
 	/* ZUS info about this FS */
 	zft->rfi		= rfs->rfi;
@@ -239,16 +240,26 @@ static unsigned long zufr_get_unmapped_area(struct file *filp,
 	return current->mm->get_unmapped_area(filp, addr, len, pgoff, flags);
 }
 
+#ifdef BACKPORT_INODE_OPS_WRAPPER
+static const struct inode_operations_wrapper zufr_inode_operations;
+#else
 static const struct inode_operations zufr_inode_operations;
+#endif /* BACKPORT_INODE_OPS_WRAPPER */
+
 static const struct file_operations zufr_file_dir_operations = {
 	.open		= dcache_dir_open,
 	.release	= dcache_dir_close,
 	.llseek		= dcache_dir_lseek,
 	.read		= generic_read_dir,
-	.iterate_shared	= dcache_readdir,
+#ifdef BACKPORT_READDIR_ITERATE
+	.readdir	= dcache_readdir,
+#else
+	.iterate_shared = dcache_readdir,
+#endif
 	.fsync		= noop_fsync,
 	.unlocked_ioctl = zufc_ioctl,
 };
+
 static const struct file_operations zufr_file_reg_operations = {
 	.fsync			= noop_fsync,
 	.unlocked_ioctl		= zufc_ioctl,
@@ -280,7 +291,7 @@ static int zufr_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
 	inode->i_atime = inode->i_ctime;
 	inode_init_owner(inode, dir, mode);
 
-	inode->i_op = &zufr_inode_operations;
+	zuf_set_inode_ops(inode, &zufr_inode_operations);
 	inode->i_fop = &zufr_file_reg_operations;
 
 	err = insert_inode_locked(inode);
@@ -314,11 +325,20 @@ static void zufr_evict_inode(struct inode *inode)
 	clear_inode(inode);
 }
 
+#ifdef BACKPORT_INODE_OPS_WRAPPER
+static const struct inode_operations_wrapper zufr_inode_operations = {
+	.tmpfile	= zufr_tmpfile,
+	.ops = {
+#else
 static const struct inode_operations zufr_inode_operations = {
+	.tmpfile	= zufr_tmpfile,
+#endif /* BACKPORT_INODE_OPS_WRAPPER */
 	.lookup		= simple_lookup,
 
-	.tmpfile	= zufr_tmpfile,
 	.unlink		= zufr_unlink,
+#ifdef BACKPORT_INODE_OPS_WRAPPER
+	},
+#endif /* BACKPORT_INODE_OPS_WRAPPER */
 };
 static const struct super_operations zufr_super_operations = {
 	.statfs		= simple_statfs,
@@ -358,7 +378,7 @@ static int zufr_fill_super(struct super_block *sb, void *data, int silent)
 
 	root_i = sb->s_root->d_inode;
 	root_i->i_fop = &zufr_file_dir_operations;
-	root_i->i_op = &zufr_inode_operations;
+	zuf_set_inode_ops(root_i, &zufr_inode_operations);
 
 	spin_lock_init(&zri->mount.lock);
 	mutex_init(&zri->sbl_lock);

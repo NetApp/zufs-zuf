@@ -173,13 +173,18 @@ extern const struct address_space_operations zuf_aops;
 void zuf_zii_sync(struct inode *inode, bool sync_nlink);
 
 /* namei.c */
+extern const struct inode_operations zuf_special_inode_operations;
+
 #ifdef BACKPORT_INODE_OPS_WRAPPER
 extern const struct inode_operations_wrapper zuf_dir_inode_operations;
+extern void zuf_set_inode_ops(struct inode *inode,
+			      const struct inode_operations_wrapper *iops);
 #else
 extern const struct inode_operations zuf_dir_inode_operations;
+extern void zuf_set_inode_ops(struct inode *inode,
+			      const struct inode_operations *iops);
 #endif /* BACKPORT_INODE_OPS_WRAPPER */
-extern const struct inode_operations *zuf_dir_inode_ops(void);
-extern const struct inode_operations zuf_special_inode_operations;
+
 
 /* symlink.c */
 extern const struct inode_operations zuf_symlink_inode_operations;

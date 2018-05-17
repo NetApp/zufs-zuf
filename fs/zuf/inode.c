@@ -36,14 +36,16 @@
 #define ZUFS_FL_OTHER_MASK (S_NOATIME)
 
 #ifdef BACKPORT_INODE_OPS_WRAPPER
-extern const struct inode_operations *zuf_dir_inode_ops(void)
+void zuf_set_inode_ops(struct inode *inode,
+		       const struct inode_operations_wrapper *iops)
 {
-	return &zuf_dir_inode_operations.ops;
+	inode->i_op = &iops->ops;
+	inode->i_flags |= S_IOPS_WRAPPER;
 }
 #else
-extern const struct inode_operations *zuf_dir_inode_ops(void)
+void zuf_set_inode_ops(struct inode *inode, const struct inode_operations *iops)
 {
-	return &zuf_dir_inode_operations;
+	inode->i_op = iops;
 }
 #endif /* BACKPORT_INODE_OPS_WRAPPER */
 
@@ -91,7 +93,7 @@ static void _set_inode_from_zi(struct inode *inode, struct zus_inode *zi)
 		inode->i_fop = zuf_fops();
 		break;
 	case S_IFDIR:
-		inode->i_op = zuf_dir_inode_ops();
+		zuf_set_inode_ops(inode, &zuf_dir_inode_operations);
 		inode->i_fop = &zuf_dir_operations;
 		break;
 	case S_IFLNK:

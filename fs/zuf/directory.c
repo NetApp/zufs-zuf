@@ -155,10 +155,23 @@ int zuf_remove_dentry(struct inode *dir, struct qstr *str, struct inode *inode)
 	return 0;
 }
 
+#ifdef BACKPORT_READDIR_ITERATE
+static int zuf_dir_open(struct inode *inode, struct file *file)
+{
+	file->f_mode |= FMODE_KABI_ITERATE;
+	return 0;
+}
+#endif /* BACKPORT_READDIR_ITERATE */
+
 const struct file_operations zuf_dir_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
+#ifdef BACKPORT_READDIR_ITERATE
+	.open		= zuf_dir_open,
+	.iterate	= zuf_readdir,
+#else
 	.iterate_shared	= zuf_readdir,
+#endif /* BACKPORT_READDIR_ITERATE */
 	.fsync		= noop_fsync,
 	.unlocked_ioctl = zuf_ioctl,
 #ifdef CONFIG_COMPAT
