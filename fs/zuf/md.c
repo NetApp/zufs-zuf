@@ -721,7 +721,7 @@ int md_t1_info_init(struct md_dev_info *mdi, bool silent)
 	long nrpages, avail, pgoff;
 	int id;
 
-	mdi->t1i.dax_dev = fs_dax_get_by_bdev(mdi->bdev);
+	mdi->t1i.dax_dev = dax_get_by_host(mdi->bdev->bd_disk->disk_name);
 	if (unlikely(!mdi->t1i.dax_dev))
 		return -EOPNOTSUPP;
 
@@ -750,7 +750,7 @@ int md_t1_info_init(struct md_dev_info *mdi, bool silent)
 
 void md_t1_info_fini(struct md_dev_info *mdi)
 {
-	fs_put_dax(mdi->t1i.dax_dev);
+	put_dax(mdi->t1i.dax_dev);
 	mdi->t1i.dax_dev = NULL;
 	mdi->t1i.virt_addr = NULL;
 }
