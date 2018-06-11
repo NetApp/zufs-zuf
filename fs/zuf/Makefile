@@ -21,3 +21,4 @@ zuf-y += acl.o xattr.o
 zuf-y += rw.o mmap.o ioctl.o
 zuf-y += super.o inode.o directory.o namei.o file.o symlink.o
 zuf-y += module.o
+zuf-y += backport.o

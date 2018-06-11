@@ -28,6 +28,7 @@
 #define BACKPORT_FOLLOW_LINK
 #define BACKPORT_XATTR_HANDLER
 #define BACKPORT_READDIR_ITERATE
+#define BACKPORT_GET_PAGES_RDWR
 
 #define SB_POSIXACL	MS_POSIXACL
 
@@ -81,6 +82,10 @@ vm_fault_t vmf_insert_mixed_mkwrite(struct vm_area_struct *vma,
 
 #define __posix_acl_create posix_acl_create
 #define posix_acl_valid(ns, acl) posix_acl_valid(acl)
+
+ssize_t iov_iter_get_pages(struct iov_iter *i,
+		   struct page **pages, size_t maxsize, unsigned maxpages,
+		   size_t *start, bool type_write);
 
 #define current_time(inode) CURRENT_TIME
 

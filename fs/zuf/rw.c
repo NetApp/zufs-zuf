@@ -173,7 +173,7 @@ static ssize_t _iov_iter_get_pages_kvec(struct iov_iter *ii,
 {
 	ssize_t bytes;
 	size_t i, nump;
-	unsigned long addr = (unsigned long)ii->kvec->iov_base;
+	unsigned long addr = (unsigned long)ii->iov->iov_base;
 
 	*start = addr & (PAGE_SIZE - 1);
 	bytes = min_t(ssize_t, iov_iter_single_seg_count(ii), maxsize);
@@ -190,19 +190,32 @@ static ssize_t _iov_iter_get_pages_kvec(struct iov_iter *ii,
 	return bytes;
 }
 
+#ifdef BACKPORT_GET_PAGES_RDWR
+static ssize_t _iov_iter_get_pages_any(struct iov_iter *ii,
+		   struct page **pages, size_t maxsize, unsigned maxpages,
+		   size_t *start, int operation)
+#else
 static ssize_t _iov_iter_get_pages_any(struct iov_iter *ii,
 		   struct page **pages, size_t maxsize, uint maxpages,
 		   size_t *start)
+#endif /* BACKPORT_GET_PAGES_RDWR */
 {
 	ssize_t bytes;
 
-	bytes = unlikely(ii->type & ITER_KVEC) ?
-		_iov_iter_get_pages_kvec(ii, pages, maxsize, maxpages, start) :
-		iov_iter_get_pages(ii, pages, maxsize, maxpages, start);
-
+	/* ii->type & ITER_KVEC */
+	if (unlikely(segment_eq(get_fs(), KERNEL_DS)))
+		bytes = _iov_iter_get_pages_kvec(ii, pages, maxsize, maxpages,
+						 start);
+	else
+		bytes = iov_iter_get_pages(ii, pages, maxsize, maxpages, start
+#ifdef BACKPORT_GET_PAGES_RDWR
+				,operation == ZUFS_OP_READ
+#endif /* BACKPORT_GET_PAGES_RDWR */
+							  );
 	if (unlikely(bytes < 0))
 		zuf_dbg_err("[%d] bytes=%ld type=%d count=%lu",
-			smp_processor_id(), bytes, ii->type, ii->count);
+			smp_processor_id(), bytes,
+			segment_eq(get_fs(), KERNEL_DS), ii->count);
 
 	return bytes;
 }
@@ -229,9 +242,15 @@ static ssize_t _zufs_IO(struct zuf_sb_info *sbi, struct inode *inode,
 		}
 		io.flags = flags;
 
+#ifdef BACKPORT_GET_PAGES_RDWR
+		bytes = _iov_iter_get_pages_any(ii, pages,
+					ZUS_API_MAP_MAX_SIZE,
+					ZUS_API_MAP_MAX_PAGES, &pgoffset, operation);
+#else
 		bytes = _iov_iter_get_pages_any(ii, pages,
 					ZUS_API_MAP_MAX_SIZE,
 					ZUS_API_MAP_MAX_PAGES, &pgoffset);
+#endif
 		if (unlikely(bytes < 0)) {
 			err = bytes;
 			break;
