@@ -32,6 +32,8 @@
 #include "md.h"
 #include "t2.h"
 
+#include "backport.h"
+
 enum zlfs_e_special_file {
 	zlfs_e_zt = 1,
 	zlfs_e_mout_thread,
