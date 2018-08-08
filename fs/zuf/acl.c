@@ -281,3 +281,106 @@ cleanup:
 	posix_acl_release(acl);
 	return err;
 }
+
+#ifdef BACKPORT_XATTR_HANDLER
+
+static size_t
+zuf_acl_xattr_list_access(struct dentry *dentry, char *list, size_t list_len,
+			  const char *name, size_t name_len, int type)
+{
+	const size_t size = sizeof(POSIX_ACL_XATTR_ACCESS);
+
+	if (!IS_POSIXACL(dentry->d_inode))
+		return 0;
+	if (list && size <= list_len)
+		memcpy(list, POSIX_ACL_XATTR_ACCESS, size);
+	return size;
+}
+
+static size_t
+zuf_acl_xattr_list_default(struct dentry *dentry, char *list, size_t list_len,
+			   const char *name, size_t name_len, int type)
+{
+	const size_t size = sizeof(POSIX_ACL_XATTR_DEFAULT);
+
+	if (!IS_POSIXACL(dentry->d_inode))
+		return 0;
+	if (list && size <= list_len)
+		memcpy(list, POSIX_ACL_XATTR_DEFAULT, size);
+	return size;
+}
+
+static int
+zuf_acl_xattr_get(struct dentry *dentry, const char *name, void *buffer,
+		  size_t size, int type)
+{
+	struct posix_acl *acl;
+	int err;
+
+	if (strcmp(name, "") != 0)
+		return -EINVAL;
+	if (!IS_POSIXACL(dentry->d_inode))
+		return -EOPNOTSUPP;
+
+	acl = zuf_get_acl(dentry->d_inode, type);
+	if (IS_ERR(acl))
+		return PTR_ERR(acl);
+	if (acl == NULL)
+		return -ENODATA;
+	err = posix_acl_to_xattr(&init_user_ns, acl, buffer, size);
+	posix_acl_release(acl);
+
+	return err;
+}
+
+static int
+zuf_acl_xattr_set(struct dentry *dentry, const char *name, const void *value,
+		  size_t size, int flags, int type)
+{
+	struct inode *inode = dentry->d_inode;
+	struct posix_acl *acl;
+	int err;
+
+	if (strcmp(name, "") != 0)
+		return -EINVAL;
+	if (!IS_POSIXACL(dentry->d_inode))
+		return -EOPNOTSUPP;
+	if (!inode_owner_or_capable(inode))
+		return -EPERM;
+
+	if (value) {
+		acl = posix_acl_from_xattr(&init_user_ns, value, size);
+		if (IS_ERR(acl))
+			return PTR_ERR(acl);
+		else if (acl) {
+			err = posix_acl_valid(inode->i_sb->s_user_ns, acl);
+			if (err)
+				goto release_and_out;
+		}
+	} else
+		acl = NULL;
+
+	err = zuf_set_acl(inode, acl, type);
+
+release_and_out:
+	posix_acl_release(acl);
+	return err;
+}
+
+const struct xattr_handler zuf_acl_access_xattr_handler = {
+	.prefix = POSIX_ACL_XATTR_ACCESS,
+	.flags	= ACL_TYPE_ACCESS,
+	.list	= zuf_acl_xattr_list_access,
+	.get	= zuf_acl_xattr_get,
+	.set	= zuf_acl_xattr_set,
+};
+
+const struct xattr_handler zuf_acl_default_xattr_handler = {
+	.prefix = POSIX_ACL_XATTR_DEFAULT,
+	.flags	= ACL_TYPE_DEFAULT,
+	.list	= zuf_acl_xattr_list_default,
+	.get	= zuf_acl_xattr_get,
+	.set	= zuf_acl_xattr_set,
+};
+
+#endif /* BACKPORT_XATTR_HANDLER */

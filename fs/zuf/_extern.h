@@ -36,8 +36,13 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 int zuf_write_inode(struct inode *inode, struct writeback_control *wbc);
 int zuf_update_time(struct inode *inode, struct timespec *time, int flags);
 int zuf_setattr(struct dentry *dentry, struct iattr *attr);
+#ifdef BACKPORT_GETATTR
+int zuf_getattr(struct vfsmount *mnt, struct dentry *dentry,
+			struct kstat *stat);
+#else
 int zuf_getattr(const struct path *path, struct kstat *stat,
 		 u32 request_mask, unsigned int flags);
+#endif /* BACKPORT_GETATTR */
 void zuf_set_inode_flags(struct inode *inode, struct zus_inode *zi);
 bool zuf_dir_emit(struct super_block *sb, struct dir_context *ctx,
 		  ulong ino, const char *name, int length);
@@ -154,14 +159,26 @@ extern const struct file_operations zuf_dir_operations;
 
 /* file.c */
 extern const struct inode_operations zuf_file_inode_operations;
+
+#ifdef BACKPORT_EXTEND_FILE_OPS
+extern const struct file_operations_extend zuf_file_operations;
+#else
 extern const struct file_operations zuf_file_operations;
+#endif /* BACKPORT_EXTEND_FILE_OPS */
+extern const struct file_operations *zuf_fops(void);
+
 
 /* inode.c */
 extern const struct address_space_operations zuf_aops;
 void zuf_zii_sync(struct inode *inode, bool sync_nlink);
 
 /* namei.c */
+#ifdef BACKPORT_INODE_OPS_WRAPPER
+extern const struct inode_operations_wrapper zuf_dir_inode_operations;
+#else
 extern const struct inode_operations zuf_dir_inode_operations;
+#endif /* BACKPORT_INODE_OPS_WRAPPER */
+extern const struct inode_operations *zuf_dir_inode_ops(void);
 extern const struct inode_operations zuf_special_inode_operations;
 
 /* symlink.c */

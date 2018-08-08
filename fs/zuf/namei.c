@@ -110,7 +110,7 @@ static int zuf_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 
 	inode->i_op = &zuf_file_inode_operations;
 	inode->i_mapping->a_ops = &zuf_aops;
-	inode->i_fop = &zuf_file_operations;
+	inode->i_fop = zuf_fops();
 
 	_instantiate_unlock(dentry, inode);
 
@@ -150,7 +150,7 @@ static int zuf_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
 	 */
 	inode->i_op = &zuf_file_inode_operations;
 	inode->i_mapping->a_ops = &zuf_aops;
-	inode->i_fop = &zuf_file_operations;
+	inode->i_fop = zuf_fops();
 
 	set_nlink(inode, 1); /* user_mode knows nothing */
 	d_tmpfile(dentry, inode);
@@ -260,7 +260,7 @@ static int zuf_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
 
-	inode->i_op = &zuf_dir_inode_operations;
+	inode->i_op = zuf_dir_inode_ops();
 	inode->i_fop = &zuf_dir_operations;
 	inode->i_mapping->a_ops = &zuf_aops;
 
@@ -406,7 +406,22 @@ static int zuf_rename(struct inode *old_dir, struct dentry *old_dentry,
 	return 0;
 }
 
+#ifdef BACKPORT_OLD_RENAME
+static int zuf_rename_old(struct inode *old_dir, struct dentry *old_dentry,
+		       struct inode *new_dir, struct dentry *new_dentry)
+{
+	return zuf_rename(old_dir, old_dentry, new_dir, new_dentry, 0);
+}
+#endif /* BACKPORT_OLD_RENAME */
+
+#ifdef BACKPORT_INODE_OPS_WRAPPER
+const struct inode_operations_wrapper zuf_dir_inode_operations = {
+	.rename2	= zuf_rename,
+	.ops = {
+#else
 const struct inode_operations zuf_dir_inode_operations = {
+#endif /* BACKPORT_INODE_OPS_WRAPPER */
+
 	.create		= zuf_create,
 	.lookup		= zuf_lookup,
 	.link		= zuf_link,
@@ -416,13 +431,27 @@ const struct inode_operations zuf_dir_inode_operations = {
 	.rmdir		= zuf_rmdir,
 	.mknod		= zuf_mknod,
 	.tmpfile	= zuf_tmpfile,
+#ifdef BACKPORT_OLD_RENAME
+	.rename		= zuf_rename_old,
+#else
 	.rename		= zuf_rename,
+#endif /* BACKPORT_OLD_RENAME */
 	.setattr	= zuf_setattr,
 	.getattr	= zuf_getattr,
 	.update_time	= zuf_update_time,
 	.get_acl	= zuf_get_acl,
+#ifndef BACKPORT_NO_SETACL
 	.set_acl	= zuf_set_acl,
+#endif /* !BACKPORT_NO_SETACL */
 	.listxattr	= zuf_listxattr,
+#ifdef BACKPORT_NEED_I_OPT_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
+	.removexattr	= generic_removexattr,
+#endif /* BACKPORT_NEED_I_OPT_XATTR */
+#ifdef BACKPORT_INODE_OPS_WRAPPER
+	},
+#endif /* BACKPORT_INODE_OPS_WRAPPER */
 };
 
 const struct inode_operations zuf_special_inode_operations = {
@@ -430,6 +459,13 @@ const struct inode_operations zuf_special_inode_operations = {
 	.getattr	= zuf_getattr,
 	.update_time	= zuf_update_time,
 	.get_acl	= zuf_get_acl,
+#ifndef BACKPORT_NO_SETACL
 	.set_acl	= zuf_set_acl,
+#endif /* !BACKPORT_NO_SETACL */
 	.listxattr	= zuf_listxattr,
+#ifdef BACKPORT_NEED_I_OPT_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
+	.removexattr	= generic_removexattr,
+#endif /* BACKPORT_NEED_I_OPT_XATTR */
 };

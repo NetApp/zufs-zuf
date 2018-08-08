@@ -16,6 +16,16 @@
 
 #include "zuf.h"
 
+static struct __xattr_type {
+	const char *prefix;
+	size_t	prefix_len;
+} xattrs[] = {
+	[ZUF_XF_SECURITY]	= {XATTR_SECURITY_PREFIX, XATTR_SECURITY_PREFIX_LEN},
+	[ZUF_XF_SYSTEM]	= {XATTR_SYSTEM_PREFIX,	  XATTR_SYSTEM_PREFIX_LEN},
+	[ZUF_XF_TRUSTED]	= {XATTR_TRUSTED_PREFIX,  XATTR_TRUSTED_PREFIX_LEN},
+	[ZUF_XF_USER]	= {XATTR_USER_PREFIX,	  XATTR_USER_PREFIX_LEN},
+};
+
 /* ~~~~~~~~~~~~~~~ xattr get ~~~~~~~~~~~~~~~ */
 
 struct _xxxattr {
@@ -206,6 +216,70 @@ ssize_t zuf_listxattr(struct dentry *dentry, char *buffer, size_t size)
 }
 
 /* ~~~~~~~~~~~~~~~ xattr sb handlers ~~~~~~~~~~~~~~~ */
+
+#ifdef BACKPORT_XATTR_HANDLER
+
+static size_t
+zuf_xattr_handler_list(struct dentry *dentry, char *list, size_t list_size,
+		       const char *name, size_t name_len, int type)
+{
+	struct __xattr_type *xt = &xattrs[type];
+	const size_t total_len = xt->prefix_len + name_len + 1;
+
+	if (list && total_len <= list_size) {
+		memcpy(list, xt->prefix, xt->prefix_len);
+		memcpy(list + xt->prefix_len, name, name_len);
+		list[xt->prefix_len + name_len] = '\0';
+	}
+	return total_len;
+}
+
+static
+int zuf_xattr_handler_get(struct dentry *dentry, const char *name,
+			  void *value, size_t size, int type)
+{
+	struct inode *inode = d_backing_inode(dentry);
+	struct zuf_inode_info *zii = ZUII(inode);
+	int ret;
+
+	zuf_dbg_xattr("[%ld] name=%s\n", inode->i_ino, name);
+
+	zuf_smr_lock(zii);
+	ret = __zuf_getxattr(inode, type, name, value, size);
+	zuf_smr_unlock(zii);
+	return ret;
+}
+
+static
+int __xattr_handler_set(int type, struct inode *inode, const char *name,
+			const void *value, size_t size, int flags)
+{
+	struct zuf_inode_info *zii = ZUII(inode);
+	int err;
+
+	zuf_dbg_xattr("[%ld] name=%s size=0x%lx flags=0x%x type=0x%x\n",
+			inode->i_ino, name, size, flags, type);
+
+
+	zuf_smw_lock(zii);
+
+	err = __zuf_setxattr(inode, type, name, value, value ? size : 0, flags);
+
+	zuf_smw_unlock(zii);
+
+	return err;
+}
+
+static
+int zuf_xattr_handler_set(struct dentry *dentry, const char *name,
+			  const void *value, size_t size, int flags, int type)
+{
+	return  __xattr_handler_set(type, d_backing_inode(dentry), name,
+				    value, size, flags);
+}
+
+#else
+
 static bool zuf_xattr_handler_list(struct dentry *dentry)
 {
 	return true;
@@ -251,6 +325,8 @@ int zuf_xattr_handler_set(const struct xattr_handler *handler,
 	return err;
 }
 
+#endif /* BACKPORT_XATTR_HANDLER */
+
 const struct xattr_handler zuf_xattr_security_handler = {
 	.prefix	= XATTR_SECURITY_PREFIX,
 	.flags = ZUF_XF_SECURITY,
@@ -279,8 +355,13 @@ const struct xattr_handler *zuf_xattr_handlers[] = {
 	&zuf_xattr_user_handler,
 	&zuf_xattr_trusted_handler,
 	&zuf_xattr_security_handler,
+#ifdef BACKPORT_XATTR_HANDLER
+	&zuf_acl_access_xattr_handler,
+	&zuf_acl_default_xattr_handler,
+#else
 	&posix_acl_access_xattr_handler,
 	&posix_acl_default_xattr_handler,
+#endif /* BACKPORT_XATTR_HANDLER */
 	NULL
 };
 
@@ -301,9 +382,14 @@ int zuf_initxattrs(struct inode *inode, const struct xattr *xattr_array,
 		zuf_warn("Yes it is name=%s value-size=%zd\n",
 			  xattr->name, xattr->value_len);
 
+#ifdef BACKPORT_XATTR_HANDLER
+		err = __xattr_handler_set(ZUF_XF_SECURITY, inode, xattr->name,
+					  xattr->value, xattr->value_len, 0);
+#else
 		err = zuf_xattr_handler_set(&zuf_xattr_security_handler, NULL,
 					    inode, xattr->name, xattr->value,
 					    xattr->value_len, 0);
+#endif /* BACKPORT_XATTR_HANDLER */
 		if (unlikely(err)) {
 			zuf_err("[%ld] failed to init xattrs err=%d\n",
 				 inode->i_ino, err);

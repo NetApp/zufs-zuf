@@ -35,6 +35,18 @@
 /* Flags that are appropriate for non-dir/non-regular files. */
 #define ZUFS_FL_OTHER_MASK (S_NOATIME)
 
+#ifdef BACKPORT_INODE_OPS_WRAPPER
+extern const struct inode_operations *zuf_dir_inode_ops(void)
+{
+	return &zuf_dir_inode_operations.ops;
+}
+#else
+extern const struct inode_operations *zuf_dir_inode_ops(void)
+{
+	return &zuf_dir_inode_operations;
+}
+#endif /* BACKPORT_INODE_OPS_WRAPPER */
+
 static bool _zi_valid(struct zus_inode *zi)
 {
 	if (!_zi_active(zi))
@@ -76,10 +88,10 @@ static void _set_inode_from_zi(struct inode *inode, struct zus_inode *zi)
 	switch (inode->i_mode & S_IFMT) {
 	case S_IFREG:
 		inode->i_op = &zuf_file_inode_operations;
-		inode->i_fop = &zuf_file_operations;
+		inode->i_fop = zuf_fops();
 		break;
 	case S_IFDIR:
-		inode->i_op = &zuf_dir_inode_operations;
+		inode->i_op = zuf_dir_inode_ops();
 		inode->i_fop = &zuf_dir_operations;
 		break;
 	case S_IFLNK:
@@ -488,10 +500,16 @@ int zuf_update_time(struct inode *inode, struct timespec *time, int flags)
 	return 0;
 }
 
+#ifdef BACKPORT_GETATTR
+int zuf_getattr(struct vfsmount *mnt, struct dentry *dentry,
+			struct kstat *stat)
+{
+#else
 int zuf_getattr(const struct path *path, struct kstat *stat, u32 request_mask,
 		unsigned int flags)
 {
 	struct dentry *dentry = path->dentry;
+#endif /* BACKPORT_GETATTR */
 	struct inode *inode = d_inode(dentry);
 
 	generic_fillattr(inode, stat);
@@ -533,7 +551,7 @@ int zuf_setattr(struct dentry *dentry, struct iattr *attr)
 		inode->i_mode = attr->ia_mode;
 		zi->i_mode = cpu_to_le16(inode->i_mode);
 		if (test_opt(SBI(inode->i_sb), POSIXACL)) {
-			err = posix_acl_chmod(inode, inode->i_mode);
+			err = backport_acl_chmod(inode);
 			if (unlikely(err))
 				return err;
 		}
@@ -637,7 +655,13 @@ void zuf_set_inode_flags(struct inode *inode, struct zus_inode *zi)
 
 /* direct_IO is not called. We set an empty one so open(O_DIRECT) will be happy
  */
+#ifdef BACKPORT_OLD_DIRECT_IO
+static ssize_t zuf_direct_IO(int rw, struct kiocb *iocb,
+			     const struct iovec *iov, loff_t offset,
+			     unsigned long nr_segs)
+#else
 static ssize_t zuf_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
+#endif /* BACKPORT_OLD_DIRECT_IO */
 {
 	WARN_ON(1);
 	return 0;

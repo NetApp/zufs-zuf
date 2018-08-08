@@ -642,6 +642,41 @@ ssize_t zuf_rw_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 }
 #endif
 
+#ifdef BACKPORT_EXTEND_FILE_OPS
+
+const struct file_operations_extend zuf_file_operations = {
+	.kabi_fops = {
+	.llseek			= zuf_llseek,
+#ifndef BACKPORT_NO_RW_ITER
+	.read_iter		= zuf_rw_read_iter,
+	.write_iter		= zuf_rw_write_iter,
+#else
+	.aio_read		= zuf_rw_file_aio_read,
+	.aio_write		= zuf_rw_file_aio_write,
+	.write			= do_sync_write,
+	.read			= do_sync_read,
+#endif
+	.mmap			= zuf_file_mmap,
+	.open			= generic_file_open,
+	.fsync			= zuf_fsync,
+	.flush			= zuf_flush,
+	.release		= zuf_file_release,
+	.unlocked_ioctl		= zuf_ioctl,
+	.fallocate		= zuf_fallocate,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl		= zuf_compat_ioctl,
+#endif
+	},
+	.copy_file_range	= zuf_copy_file_range,
+	.clone_file_range	= zuf_clone_file_range,
+};
+
+const struct file_operations *zuf_fops(void) {
+		return &zuf_file_operations.kabi_fops;
+}
+
+#else
+
 const struct file_operations zuf_file_operations = {
 	.llseek			= zuf_llseek,
 #ifndef BACKPORT_NO_RW_ITER
@@ -667,12 +702,25 @@ const struct file_operations zuf_file_operations = {
 	.clone_file_range	= zuf_clone_file_range,
 };
 
+const struct file_operations *zuf_fops(void) {
+		return &zuf_file_operations;
+}
+
+#endif /* BACKPORT_EXTEND_FILE_OPS */
+
 const struct inode_operations zuf_file_inode_operations = {
 	.setattr	= zuf_setattr,
 	.getattr	= zuf_getattr,
 	.update_time	= zuf_update_time,
 	.fiemap		= zuf_fiemap,
 	.get_acl	= zuf_get_acl,
+#ifndef BACKPORT_NO_SETACL
 	.set_acl	= zuf_set_acl,
+#endif /* !BACKPORT_NO_SETACL */
 	.listxattr	= zuf_listxattr,
+#ifdef BACKPORT_NEED_I_OPT_XATTR
+	.setxattr	= generic_setxattr,
+	.getxattr	= generic_getxattr,
+	.removexattr	= generic_removexattr,
+#endif /* BACKPORT_NEED_I_OPT_XATTR */
 };

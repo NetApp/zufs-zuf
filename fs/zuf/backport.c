@@ -12,6 +12,7 @@
 
 #include <linux/pagemap.h>
 #include <linux/uio.h>
+#include <linux/posix_acl.h>
 
 #include "zuf.h"
 
@@ -85,4 +86,24 @@ ssize_t iov_iter_get_pages(struct iov_iter *i,
 	})
 	)
 	return 0;
+}
+
+int backport_acl_chmod(struct inode *inode)
+{
+	struct posix_acl *acl;
+	int err;
+
+	if (S_ISLNK(inode->i_mode))
+		return -EOPNOTSUPP;
+
+	acl = zuf_get_acl(inode, ACL_TYPE_ACCESS);
+	if (IS_ERR(acl) || !acl)
+		return PTR_ERR(acl);
+	err = posix_acl_chmod(&acl, GFP_KERNEL, inode->i_mode);
+	if (err)
+		return err;
+
+	err = zuf_set_acl(inode, acl, ACL_TYPE_ACCESS);
+	posix_acl_release(acl);
+	return err;
 }
