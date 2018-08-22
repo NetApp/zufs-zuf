@@ -200,30 +200,34 @@ static void _sb_mwtime_now(struct super_block *sb, struct md_dev_table *zdt)
 	/* TOZO _persist_md(sb, &zdt->s_mtime, 2*sizeof(zdt->s_mtime)); */
 }
 
-static void _clean_bdi(struct super_block *sb)
-{
-	if (sb->s_bdi != &noop_backing_dev_info) {
-		bdi_put(sb->s_bdi);
-		sb->s_bdi = &noop_backing_dev_info;
-	}
-}
-
-static int _setup_bdi(struct super_block *sb, const char *device_name)
+static int _setup_bdi(struct zuf_sb_info *sbi, const char *device_name)
 {
 	int err;
 
-	if (sb->s_bdi)
-		_clean_bdi(sb);
+	snprintf(sbi->bdi_name, sizeof(sbi->bdi_name), "zuf-%s", device_name);
+	sbi->bdi.name = sbi->bdi_name;
+	sbi->bdi.ra_pages = ZUFS_READAHEAD_PAGES;
+	sbi->bdi.capabilities = BDI_CAP_NO_ACCT_AND_WRITEBACK;
 
-	err = super_setup_bdi_name(sb, "zuf-%s", device_name);
+	err = bdi_init(&sbi->bdi);
+	if (err)
+		return err;
+
+	err = bdi_register(&sbi->bdi, NULL, sbi->bdi_name);
 	if (unlikely(err)) {
-		zuf_err("Failed to super_setup_bdi\n");
+		bdi_destroy(&sbi->bdi);
 		return err;
 	}
 
-	sb->s_bdi->ra_pages = ZUFS_READAHEAD_PAGES;
-	sb->s_bdi->capabilities = BDI_CAP_NO_ACCT_AND_WRITEBACK;
 	return 0;
+}
+
+static void _destroy_bdi(struct zuf_sb_info *sbi)
+{
+	sbi->bdi.name = NULL;
+	sbi->bdi.ra_pages = 0;
+	sbi->bdi.capabilities = 0;
+	bdi_destroy(&sbi->bdi);
 }
 
 static int _sb_add(struct zuf_root_info *zri, struct super_block *sb,
@@ -316,14 +320,6 @@ static void zuf_put_super(struct super_block *sb)
 {
 	struct zuf_sb_info *sbi = SBI(sb);
 
-	/* FIXME: This is because of a Kernel BUG (in v4.20) which
-	 * sometimes complains in _setup_bdi() on a recycle_mount that sysfs
-	 * bdi already exists. Cleaning here solves it.
-	 * Calling synchronize_rcu in zuf_kill_sb() after the call to
-	 * kill_block_super() does NOT solve it.
-	 */
-	_clean_bdi(sb);
-
 	if (sbi->zus_sbi) {
 		struct zufs_ioc_mount zim = {
 			.zmi.zus_sbi = sbi->zus_sbi,
@@ -346,6 +342,7 @@ static void zuf_put_super(struct super_block *sb)
 	}
 
 	_sb_remove(ZUF_ROOT(sbi), sb);
+	_destroy_bdi(sbi);
 	sb->s_fs_info = NULL;
 	if (!test_opt(sbi, FAILED))
 		zuf_info("unmounted /dev/%s\n", _bdev_name(sb->s_bdev));
@@ -514,6 +511,14 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 		err = -ENOMEM;
 		goto error;
 	}
+
+	err = _setup_bdi(sbi, _bdev_name(sb->s_bdev));
+	if (err) {
+		zuf_err_cnd(silent, "Failed to setup bdi => %d\n", err);
+		goto error;
+	}
+	sb->s_bdi = &sbi->bdi;
+
 	sb->s_fs_info = sbi;
 	sbi->sb = sb;
 
@@ -534,12 +539,6 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	err = _parse_options(sbi, fsp->mount_options, 0, &ioc_mount->zmi.po);
 	if (err)
 		goto error;
-
-	err = _setup_bdi(sb, _bdev_name(sb->s_bdev));
-	if (err) {
-		zuf_err_cnd(silent, "Failed to setup bdi => %d\n", err);
-		goto error;
-	}
 
 	/* Tell ZUS to mount an FS for us */
 	ioc_mount->zmi.pmem_kern_id = zuf_pmem_id(sbi->md);

@@ -363,6 +363,9 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 	if (err && err != -EOPNOTSUPP)
 		goto fail;
 
+	/* override bdev bdi with our own */
+	inode->i_mapping->backing_dev_info = &sbi->bdi;
+
 	err = zuf_acls_create_pre(dir, inode, &acl);
 	if (unlikely(err))
 		goto fail;

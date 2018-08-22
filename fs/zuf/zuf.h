@@ -199,6 +199,10 @@ struct zuf_sb_info {
 	unsigned long	s_mount_opt;
 	char		*pmount_dev; /* for private mount */
 
+	/* bdi */
+	struct backing_dev_info bdi;
+	char bdi_name[64];
+
 	spinlock_t		s_mmap_dirty_lock;
 	struct list_head	s_mmap_dirty;
 };
