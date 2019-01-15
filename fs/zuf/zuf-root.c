@@ -167,7 +167,9 @@ int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs)
 	zft->vfs_fst.name	= kstrdup(rfs->rfi.fsname, GFP_KERNEL);
 	zft->vfs_fst.mount	= zuf_mount;
 	zft->vfs_fst.kill_sb	= kill_block_super;
+#if RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7,5)
 	zft->vfs_fst.fs_flags	= FS_HAS_FO_EXTEND;
+#endif
 
 	/* ZUS info about this FS */
 	zft->rfi		= rfs->rfi;
@@ -175,6 +177,13 @@ int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs)
 	INIT_LIST_HEAD(&zft->list);
 	/* Back pointer to our communication channels */
 	zft->zri		= ZRI(sb);
+
+#if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,6)
+	if (register_fo_extend(&zuf_file_operations) == -1) {
+		_fs_type_free(zft);
+		return -ENOMEM;
+	}
+#endif
 
 	zuf_add_fs_type(zft->zri, zft);
 	zuf_info("register_filesystem [%s]\n", zft->vfs_fst.name);
@@ -187,6 +196,9 @@ static void _unregister_all_fses(struct zuf_root_info *zri)
 
 	list_for_each_entry_safe_reverse(zft, n, &zri->fst_list, list) {
 		unregister_filesystem(&zft->vfs_fst);
+#if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,6)
+		unregister_fo_extend(&zuf_file_operations);
+#endif
 		list_del_init(&zft->list);
 		_fs_type_free(zft);
 	}

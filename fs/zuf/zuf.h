@@ -25,6 +25,7 @@
 #include <linux/page_ref.h>
 #include <linux/mm.h>
 #include <linux/aio.h>
+#include <linux/version.h>
 
 #include "zus_api.h"
 

@@ -42,8 +42,10 @@ static inline int _compat_generic_write_checks(struct kiocb *kiocb,
 static inline
 void zuf_backport_fix_vma(struct vm_area_struct *vma)
 {
+#if RHEL_RELEASE_CODE == RHEL_RELEASE_VERSION(7,5)
 	/* vm_insert_mixed in RHEL 7.5 requires this */
 	vma->vm_flags |= VM_MIXEDMAP;
+#endif
 }
 
 typedef int vm_fault_t;
@@ -75,7 +77,11 @@ vm_fault_t vmf_insert_mixed_mkwrite(struct vm_area_struct *vma,
 {
 	int err;
 
+#if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,6)
+	err = vm_insert_mixed_mkwrite(vma, addr, pfn);
+#else /* RHEL <= 7.5 */
 	err = vm_insert_mixed(vma, addr, pfn);
+#endif
 
 	return vm_fault_t_return(err);
 }

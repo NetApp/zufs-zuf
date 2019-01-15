@@ -669,6 +669,9 @@ const struct file_operations_extend zuf_file_operations = {
 	},
 	.copy_file_range	= zuf_copy_file_range,
 	.clone_file_range	= zuf_clone_file_range,
+#if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,6)
+	.mmap_supported_flags	= MAP_SYNC,
+#endif
 };
 
 const struct file_operations *zuf_fops(void) {
