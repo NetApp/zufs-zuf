@@ -240,7 +240,7 @@ static inline bool _zi_active(struct zus_inode *zi)
 	return (zi->i_nlink || zi->i_mode);
 }
 
-static inline void mt_to_timespec(struct timespec64 *t, __le64 *mt)
+static inline void mt_to_timespec(struct timespec *t, __le64 *mt)
 {
 	u32 nsec;
 
@@ -248,7 +248,7 @@ static inline void mt_to_timespec(struct timespec64 *t, __le64 *mt)
 	t->tv_nsec = nsec;
 }
 
-static inline void timespec_to_mt(__le64 *mt, struct timespec64 *t)
+static inline void timespec_to_mt(__le64 *mt, struct timespec *t)
 {
 	*mt = cpu_to_le64(t->tv_sec * NSEC_PER_SEC + t->tv_nsec);
 }

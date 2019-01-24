@@ -276,7 +276,7 @@ static int zufr_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
 
 	inode->i_ino = ++zri->next_ino; /* none atomic only one mount thread */
 	inode->i_blocks = inode->i_size = 0;
-	inode->i_ctime = inode->i_mtime = current_time(inode);
+	inode->i_ctime = inode->i_mtime = current_kernel_time();
 	inode->i_atime = inode->i_ctime;
 	inode_init_owner(inode, dir, mode);
 

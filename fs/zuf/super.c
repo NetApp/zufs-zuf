@@ -193,7 +193,7 @@ no_space:
 
 static void _sb_mwtime_now(struct super_block *sb, struct md_dev_table *zdt)
 {
-	struct timespec64 now = current_time(sb->s_root->d_inode);
+	struct timespec now = current_kernel_time();
 
 	timespec_to_mt(&zdt->s_mtime, &now);
 	zdt->s_wtime = zdt->s_mtime;
@@ -739,7 +739,7 @@ fail:
 static int zuf_update_s_wtime(struct super_block *sb)
 {
 	if (!(sb->s_flags & MS_RDONLY)) {
-		struct timespec64 now = current_time(sb->s_root->d_inode);
+		struct timespec now = current_kernel_time();
 
 		timespec_to_mt(&md_zdt(SBI(sb)->md)->s_wtime, &now);
 	}

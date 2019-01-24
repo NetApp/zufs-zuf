@@ -338,7 +338,7 @@ static int zuf_rename(struct inode *old_dir, struct dentry *old_dentry,
 		.new_d_str.len = new_dentry->d_name.len,
 		.flags = flags,
 	};
-	struct timespec64 time = current_time(old_dir);
+	struct timespec time = current_time(old_dir);
 	int err;
 
 	zuf_dbg_vfs(

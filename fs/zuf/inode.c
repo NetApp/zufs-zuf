@@ -145,7 +145,7 @@ static int _set_zi_from_inode(struct inode *dir, struct zus_inode *zi,
 	return 0;
 }
 
-static bool _times_equal(struct timespec64 *t, __le64 *mt)
+static bool _times_equal(struct timespec *t, __le64 *mt)
 {
 	__le64 time;
 
@@ -162,9 +162,9 @@ static void _warn_inode_dirty(struct inode *inode, struct zus_inode *zi)
 			  inode->i_ino, (ulong)(X), (ulong)(Y))
 #define __MISMACH_TIME(inode, X, Y)	\
 	if (!_times_equal(X, Y)) {	\
-		struct timespec64 t;	\
+		struct timespec t;	\
 		mt_to_timespec(&t, (Y));\
-		zuf_warn("[%ld] " #X"=%lld:%ld " #Y"=%lld:%ld""\n",	\
+		zuf_warn("[%ld] " #X"=%ld:%ld " #Y"=%ld:%ld""\n",	\
 			  inode->i_ino, (X)->tv_sec, (X)->tv_nsec,	\
 			  t.tv_sec, t.tv_nsec);		\
 	}
@@ -450,7 +450,7 @@ int zuf_write_inode(struct inode *inode, struct writeback_control *wbc)
  *
  * But also file_update_time is used by fifo code.
  */
-int zuf_update_time(struct inode *inode, struct timespec64 *time, int flags)
+int zuf_update_time(struct inode *inode, struct timespec *time, int flags)
 {
 	struct zus_inode *zi = zus_zi(inode);
 

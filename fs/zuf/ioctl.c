@@ -39,7 +39,7 @@ static int _ioctl_dispatch(struct inode *inode, uint cmd, ulong arg)
 	struct zufs_ioc_ioctl *ioc_ioctl;
 	size_t ioc_size = _IOC_SIZE(cmd);
 	void __user *parg = (void __user *)arg;
-	struct timespec64 time = current_time(inode);
+	struct timespec time = current_time(inode);
 	size_t size;
 	bool retry = false;
 	int err;

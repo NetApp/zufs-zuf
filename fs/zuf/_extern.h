@@ -34,7 +34,7 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 			    const struct qstr *qstr, const char *symname,
 			    ulong rdev_or_isize, bool tmpfile);
 int zuf_write_inode(struct inode *inode, struct writeback_control *wbc);
-int zuf_update_time(struct inode *inode, struct timespec64 *time, int flags);
+int zuf_update_time(struct inode *inode, struct timespec *time, int flags);
 int zuf_setattr(struct dentry *dentry, struct iattr *attr);
 int zuf_getattr(const struct path *path, struct kstat *stat,
 		 u32 request_mask, unsigned int flags);
