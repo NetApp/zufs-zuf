@@ -838,7 +838,7 @@ static struct inode *zuf_alloc_inode(struct super_block *sb)
 	if (!zii)
 		return NULL;
 
-	zii->vfs_inode.i_version.counter = 1;
+	zii->vfs_inode.i_version = 1;
 	return &zii->vfs_inode;
 }
 
