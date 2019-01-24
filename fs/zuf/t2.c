@@ -58,7 +58,7 @@ static void _tis_put(struct t2_io_state *tis)
 	t2_tis_dbg_rw(tis, "done=%pS\n", tis->done);
 
 	if (test_bit(B_TIS_FREE_AFTER_WAIT, &tis->rw_flags))
-		wake_up_var(&tis->refcount);
+		wake_up_atomic_t(&tis->refcount);
 	else if (tis->done)
 		/* last - done may free the tis */
 		tis->done(tis, NULL, true);
@@ -326,7 +326,13 @@ int t2_io_end(struct t2_io_state *tis, bool wait)
 	tis_put(tis);
 
 	if (wait) {
-		wait_var_event(&tis->refcount, !atomic_read(&tis->refcount));
+		int err;
+
+		err = wait_on_atomic_t(&tis->refcount, atomic_t_wait,
+					TASK_UNINTERRUPTIBLE);
+		if (unlikely(err))
+			zuf_err("UNINTERRUPTIBLE wait error =>%d\n", err);
+
 		if (tis->done)
 			tis->done(tis, NULL, true);
 	}
