@@ -17,7 +17,6 @@
 #include <linux/types.h>
 #include <linux/uuid.h>
 #include <stddef.h>
-#include <linux/statfs.h>
 
 #include "md_def.h"
 
@@ -41,8 +40,21 @@
 #define ZUFS_MAJOR_VERSION 1
 #define ZUFS_MINOR_VERSION 0
 
-/* User space compatibility definitions */
-#ifndef __KERNEL__
+/* Kernel versus User space compatibility definitions */
+#ifdef __KERNEL__
+
+#include <linux/statfs.h>
+
+#else /* ! __KERNEL__ */
+
+/* verify statfs64 definition is included */
+#if !defined(__USE_LARGEFILE64) && defined(_SYS_STATFS_H)
+#error "include to 'sys/statfs.h' must appear after 'zus_api.h'"
+#else
+#define __USE_LARGEFILE64 1
+#endif
+
+#include <sys/statfs.h>
 
 #include <string.h>
 
