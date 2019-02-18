@@ -70,6 +70,81 @@ static void _fs_type_free(struct zuf_fs_type *zft)
 }
 #endif /*CONFIG_LOCKDEP*/
 
+#define DDBG_MAX_BUF_SIZE	(8 * PAGE_SIZE)
+/* We use ppos as a cookie for the dynamic debug ID we want to read from */
+static ssize_t _zus_ddbg_read(struct file *file, char __user *buf, size_t len,
+			      loff_t *ppos)
+{
+	struct zufs_ioc_mount *zim;
+	size_t buf_size = (DDBG_MAX_BUF_SIZE <= len) ? DDBG_MAX_BUF_SIZE : len;
+	size_t zim_size =  sizeof(zim->hdr) + sizeof(zim->zdi);
+	ssize_t err;
+
+	zim = vzalloc(zim_size + buf_size);
+	if (unlikely(!zim))
+		return -ENOMEM;
+
+	/* null terminate the 1st character in the buffer, hence the '+ 1' */
+	zim->hdr.in_len = zim_size + 1;
+	zim->hdr.out_len = zim_size + buf_size;
+	zim->zdi.len = buf_size;
+	zim->zdi.id = *ppos;
+	*ppos = 0;
+
+	err = __zufc_dispatch_mount(ZRI(file->f_inode->i_sb), ZUFS_M_DDBG_RD,
+				    zim);
+	if (unlikely(err)) {
+		zuf_err("error dispatching contorl message => %ld\n", err);
+		goto out;
+	}
+
+	err = simple_read_from_buffer(buf, zim->zdi.len, ppos, zim->zdi.msg,
+				      buf_size);
+	if (unlikely(err <= 0))
+		goto out;
+
+	*ppos = zim->zdi.id;
+out:
+	vfree(zim);
+	return err;
+}
+
+static ssize_t _zus_ddbg_write(struct file *file, const char __user *buf,
+			       size_t len, loff_t *ofst)
+{
+	struct _ddbg_info {
+		struct zufs_ioc_mount zim;
+		char buf[512];
+	} ddi = {};
+	ssize_t err;
+
+	if (unlikely(512 < len)) {
+		zuf_err("ddbg control message to long\n");
+		return -EINVAL;
+	}
+
+	memset(&ddi, 0, sizeof(ddi));
+	if (copy_from_user(ddi.zim.zdi.msg, buf, len))
+		return -EFAULT;
+
+	ddi.zim.hdr.in_len = sizeof(ddi);
+	ddi.zim.hdr.out_len = sizeof(ddi.zim);
+	err = __zufc_dispatch_mount(ZRI(file->f_inode->i_sb), ZUFS_M_DDBG_WR,
+				    &ddi.zim);
+	if (unlikely(err)) {
+		zuf_err("error dispatching contorl message => %ld\n", err);
+		return err;
+	}
+
+	return len;
+}
+
+static const struct file_operations _zus_ddbg_ops = {
+	.open = nonseekable_open,
+	.read = _zus_ddbg_read,
+	.write = _zus_ddbg_write,
+	.llseek = no_llseek,
+};
 
 static ssize_t _state_read(struct file *file, char __user *buf, size_t len,
 			   loff_t *ppos)
@@ -338,6 +413,7 @@ static int zufr_fill_super(struct super_block *sb, void *data, int silent)
 	static struct tree_descr zufr_files[] = {
 		[2] = {"state", &_state_ops, S_IFREG | 0400},
 		[3] = {"registered_fs", &_registered_fs_ops, S_IFREG | 0400},
+		[4] = {"ddbg", &_zus_ddbg_ops, S_IFREG | 0600},
 		{""},
 	};
 	struct zuf_root_info *zri;
