@@ -83,6 +83,9 @@ static void _set_inode_from_zi(struct inode *inode, struct zus_inode *zi)
 		inode->i_op = &zuf_dir_inode_operations;
 		inode->i_fop = &zuf_dir_operations;
 		break;
+	case S_IFLNK:
+		inode->i_op = &zuf_symlink_inode_operations;
+		break;
 	case S_IFBLK:
 	case S_IFCHR:
 	case S_IFIFO:
@@ -348,6 +351,10 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 	if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode) ||
 	    S_ISFIFO(inode->i_mode) || S_ISSOCK(inode->i_mode)) {
 		init_special_inode(inode, mode, rdev_or_isize);
+	} else if (symname) {
+		inode->i_size = rdev_or_isize;
+		nump = zuf_prepare_symname(&ioc_new_inode, symname,
+					   rdev_or_isize, pages);
 	}
 
 	err = _set_zi_from_inode(dir, &ioc_new_inode.zi, inode);
