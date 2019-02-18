@@ -39,6 +39,9 @@ int zuf_setattr(struct dentry *dentry, struct iattr *attr);
 int zuf_getattr(const struct path *path, struct kstat *stat,
 		 u32 request_mask, unsigned int flags);
 void zuf_set_inode_flags(struct inode *inode, struct zus_inode *zi);
+bool zuf_dir_emit(struct super_block *sb, struct dir_context *ctx,
+		  ulong ino, const char *name, int length);
+
 
 /* rw.c */
 int zuf_trim_edge(struct inode *inode, ulong filepos, uint len);

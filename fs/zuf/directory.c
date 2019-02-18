@@ -17,6 +17,74 @@
 #include <linux/vmalloc.h>
 #include "zuf.h"
 
+static int zuf_readdir(struct file *file, struct dir_context *ctx)
+{
+	struct inode *inode = file_inode(file);
+	struct super_block *sb = inode->i_sb;
+	loff_t i_size = i_size_read(inode);
+	struct zufs_ioc_readdir ioc_readdir = {
+		.hdr.in_len = sizeof(ioc_readdir),
+		.hdr.out_len = sizeof(ioc_readdir),
+		.hdr.operation = ZUFS_OP_READDIR,
+		.dir_ii = ZUII(inode)->zus_ii,
+	};
+	struct zufs_readdir_iter rdi;
+	struct page *pages[ZUS_API_MAP_MAX_PAGES];
+	struct zufs_dir_entry *zde;
+	void *addr, *__a;
+	uint nump, i;
+	int err;
+
+	if (ctx->pos && i_size <= ctx->pos)
+		return 0;
+	if (!i_size)
+		i_size = PAGE_SIZE; /* Just for the . && .. */
+	if (i_size - ctx->pos < PAGE_SIZE)
+		ioc_readdir.hdr.len = PAGE_SIZE;
+	else
+		ioc_readdir.hdr.len = min_t(loff_t, i_size - ctx->pos,
+					    ZUS_API_MAP_MAX_SIZE);
+	nump = md_o2p_up(ioc_readdir.hdr.len);
+	addr = vzalloc(md_p2o(nump));
+	if (unlikely(!addr))
+		return -ENOMEM;
+
+	WARN_ON((ulong)addr & (PAGE_SIZE - 1));
+
+	__a = addr;
+	for (i = 0; i < nump; ++i) {
+		pages[i] = vmalloc_to_page(__a);
+		__a += PAGE_SIZE;
+	}
+
+more:
+	ioc_readdir.pos = ctx->pos;
+
+	err = zufc_dispatch(ZUF_ROOT(SBI(sb)), &ioc_readdir.hdr, pages, nump);
+	if (unlikely(err && err != -EINTR)) {
+		zuf_err("zufc_dispatch failed => %d\n", err);
+		goto out;
+	}
+
+	zufs_readdir_iter_init(&rdi, &ioc_readdir, addr);
+	while ((zde = zufs_next_zde(&rdi)) != NULL) {
+		zuf_dbg_verbose("%s pos=0x%lx\n",
+				zde->zstr.name, (ulong)zde->pos);
+		ctx->pos = zde->pos;
+		if (!dir_emit(ctx, zde->zstr.name, zde->zstr.len, zde->ino,
+			      zde->type))
+			goto out;
+	}
+	ctx->pos = ioc_readdir.pos;
+	if (ioc_readdir.more) {
+		zuf_dbg_err("more\n");
+		goto more;
+	}
+out:
+	vfree(addr);
+	return err;
+}
+
 /*
  *FIXME comment to full git diff
  */
@@ -90,5 +158,6 @@ int zuf_remove_dentry(struct inode *dir, struct qstr *str, struct inode *inode)
 const struct file_operations zuf_dir_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= generic_read_dir,
+	.iterate_shared	= zuf_readdir,
 	.fsync		= noop_fsync,
 };
