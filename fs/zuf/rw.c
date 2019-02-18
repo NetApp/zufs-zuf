@@ -315,6 +315,60 @@ ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
 	return ret;
 }
 
+static int _fadv_willneed(struct super_block *sb, struct inode *inode,
+			  loff_t offset, loff_t len, bool rand)
+{
+	struct zufs_ioc_IO io = {};
+	struct __zufs_ra ra = {
+		.start = md_o2p(offset),
+		.ra_pages = md_o2p_up(len),
+		.prev_pos = offset - 1,
+	};
+	int err;
+
+	io.ra.start = ra.start;
+	io.ra.ra_pages = ra.ra_pages;
+	io.ra.prev_pos = ra.prev_pos;
+	io.flags = rand ? ZUFS_IO_RAND : 0;
+
+	err = _IO_dispatch(SBI(sb), &io, ZUII(inode), ZUFS_OP_PRE_READ, 0,
+			   NULL, 0, offset, 0);
+	return err;
+}
+
+static int _fadv_dontneed(struct super_block *sb, struct inode *inode,
+			  loff_t offset, loff_t len)
+{
+	struct zufs_ioc_range ioc_range = {
+		.hdr.in_len = sizeof(ioc_range),
+		.hdr.operation = ZUFS_OP_SYNC,
+		.zus_ii = ZUII(inode)->zus_ii,
+		.offset = offset,
+		.length = len,
+		.ioc_flags = ZUFS_RF_DONTNEED,
+	};
+
+	return zufc_dispatch(ZUF_ROOT(SBI(sb)), &ioc_range.hdr, NULL, 0);
+}
+
+int zuf_fadvise(struct super_block *sb, struct inode *inode,
+		loff_t offset, loff_t len, int advise, bool rand)
+{
+	switch (advise) {
+	case POSIX_FADV_WILLNEED:
+		return _fadv_willneed(sb, inode, offset, len, rand);
+	case POSIX_FADV_DONTNEED:
+		return _fadv_dontneed(sb, inode, offset, len);
+	case POSIX_FADV_NOREUSE: /* TODO */
+	case POSIX_FADV_SEQUENTIAL: /* TODO: turn off random */
+	case POSIX_FADV_NORMAL:
+		return 0;
+	default:
+		return -EINVAL;
+	}
+	return -EINVAL;
+}
+
 /* ~~~~ iom_dec.c ~~~ */
 /* for now here (at rw.c) looks logical */
 

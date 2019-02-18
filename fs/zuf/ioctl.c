@@ -238,6 +238,29 @@ static int _ioc_setversion(struct inode *inode, uint __user *parg)
 	return err;
 }
 
+static int _ioc_fadvise(struct file *file, ulong arg)
+{
+	struct inode *inode = file_inode(file);
+	struct zuf_inode_info *zii = ZUII(inode);
+	struct zufs_ioc_fadvise iof = {};
+	int err;
+
+	if (!S_ISREG(inode->i_mode))
+		return -EINVAL;
+
+	if (arg && copy_from_user(&iof, (void __user *)arg, sizeof(iof)))
+		return -EFAULT;
+
+	zuf_r_lock(zii);
+
+	err = zuf_fadvise(inode->i_sb, inode, iof.offset, iof.length,
+			  iof.advise, file->f_mode & FMODE_RANDOM);
+
+	zuf_r_unlock(zii);
+
+	return err;
+}
+
 long zuf_ioctl(struct file *filp, unsigned int cmd, ulong arg)
 {
 	struct inode *inode = filp->f_inode;
@@ -252,6 +275,8 @@ long zuf_ioctl(struct file *filp, unsigned int cmd, ulong arg)
 		return put_user(inode->i_generation, (int __user *)arg);
 	case FS_IOC_SETVERSION:
 		return _ioc_setversion(inode, parg);
+	case ZUFS_IOC_FADVISE:
+		return _ioc_fadvise(filp, arg);
 	default:
 		return _ioctl_dispatch(inode, cmd, arg);
 	}

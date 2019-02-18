@@ -159,6 +159,19 @@ struct zus_inode {
 	/* Total ZUFS_INODE_SIZE bytes always */
 };
 
+/* ~~~~~ vfs extension ioctl commands ~~~~~ */
+
+/* TODO: This one needs to be an FS vector called from
+ * the fadvise()  system call. (Future patch)
+ */
+struct zufs_ioc_fadvise {
+	__u64	offset;
+	__u64	length;		/* if 0 all file */
+	__u64	advise;
+} __packed;
+
+#define ZUFS_IOC_FADVISE	_IOW('S', 2, struct zufs_ioc_fadvise)
+
 /* ~~~~~ ZUFS API ioctl commands ~~~~~ */
 enum {
 	ZUS_API_MAP_MAX_PAGES	= 1024,
@@ -341,6 +354,7 @@ enum e_zufs_operation {
 	ZUFS_OP_COPY,
 
 	ZUFS_OP_READ,
+	ZUFS_OP_PRE_READ,
 	ZUFS_OP_WRITE,
 	ZUFS_OP_GET_BLOCK,
 	ZUFS_OP_PUT_BLOCK,

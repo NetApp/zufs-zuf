@@ -66,6 +66,8 @@ ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
 ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
 			  struct kiocb *kiocb, struct iov_iter *ii);
 int zuf_trim_edge(struct inode *inode, ulong filepos, uint len);
+int zuf_fadvise(struct super_block *sb, struct inode *inode,
+		loff_t offset, loff_t len, int advise, bool rand);
 int zuf_iom_execute_sync(struct super_block *sb, struct inode *inode,
 			 __u64 *iom_e, uint iom_n);
 int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
