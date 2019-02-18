@@ -657,7 +657,8 @@ static int _zu_wait(struct file *file, void *parg)
 		 * we should have a bit set in zt->zdo->hdr set per operation.
 		 * TODO: Why this does not work?
 		 */
-		_map_pages(zt, zt->zdo->pages, zt->zdo->nump, 0);
+		_map_pages(zt, zt->zdo->pages, zt->zdo->nump,
+			   zt->zdo->hdr->operation == ZUFS_OP_WRITE);
 		memcpy(zt->opt_buff, zt->zdo->hdr, zt->zdo->hdr->in_len);
 	} else {
 		struct zufs_ioc_hdr *hdr = zt->opt_buff;
@@ -776,6 +777,10 @@ const char *zuf_op_name(enum e_zufs_operation op)
 		CASE_ENUM_NAME(ZUFS_OP_READDIR		);
 		CASE_ENUM_NAME(ZUFS_OP_CLONE		);
 		CASE_ENUM_NAME(ZUFS_OP_COPY		);
+		CASE_ENUM_NAME(ZUFS_OP_READ		);
+		CASE_ENUM_NAME(ZUFS_OP_WRITE		);
+		CASE_ENUM_NAME(ZUFS_OP_GET_BLOCK	);
+		CASE_ENUM_NAME(ZUFS_OP_PUT_BLOCK	);
 		CASE_ENUM_NAME(ZUFS_OP_GET_SYMLINK	);
 		CASE_ENUM_NAME(ZUFS_OP_SETATTR		);
 		CASE_ENUM_NAME(ZUFS_OP_FALLOCATE	);
@@ -832,6 +837,30 @@ static inline struct zu_exec_buff *_ebuff_from_file(struct file *file)
 	return ebuff;
 }
 
+static int _ebuff_bounds_check(struct zu_exec_buff *ebuff, ulong buff,
+			       struct zufs_iomap *ziom,
+			       struct zufs_iomap *user_ziom, void *ziom_end)
+{
+	size_t iom_max_bytes = ziom_end - (void *)&user_ziom->iom_e;
+
+	if (buff != ebuff->vma->vm_start ||
+	    ebuff->vma->vm_end < buff + iom_max_bytes) {
+		WARN_ON_ONCE(1);
+		zuf_err("Executing out off bound vm_start=0x%lx vm_end=0x%lx buff=0x%lx buff_end=0x%lx\n",
+			ebuff->vma->vm_start, ebuff->vma->vm_end, buff,
+			buff + iom_max_bytes);
+		return -EINVAL;
+	}
+
+	if (unlikely((iom_max_bytes / sizeof(__u64) < ziom->iom_max)))
+		return -EINVAL;
+
+	if (unlikely(ziom->iom_max < ziom->iom_n))
+		return -EINVAL;
+
+	return 0;
+}
+
 static int _zu_ebuff_alloc(struct file *file, void *arg)
 {
 	struct zufs_ioc_alloc_buffer ioc_alloc;
@@ -884,6 +913,52 @@ static void zufc_ebuff_release(struct file *file)
 	kfree(ebuff);
 }
 
+static int _zu_iomap_exec(struct file *file, void *arg)
+{
+	struct zuf_root_info *zri = ZRI(file->f_inode->i_sb);
+	struct zu_exec_buff *ebuff = _ebuff_from_file(file);
+	struct zufs_ioc_iomap_exec ioc_iomap;
+	struct zufs_ioc_iomap_exec *user_iomap;
+
+	struct super_block *sb;
+	int err;
+
+	if (unlikely(!ebuff))
+		return -EINVAL;
+
+	user_iomap = ebuff->opt_buff;
+	/* do all checks on a kernel copy so malicious Server cannot
+	 * crash the Kernel
+	 */
+	ioc_iomap = *user_iomap;
+
+	err = _ebuff_bounds_check(ebuff, (ulong)arg, &ioc_iomap.ziom,
+				  &user_iomap->ziom,
+				  ebuff->opt_buff + ebuff->alloc_size);
+	if (unlikely(err)) {
+		zuf_err("illegal iomap: iom_max=%u iom_n=%u\n",
+			ioc_iomap.ziom.iom_max, ioc_iomap.ziom.iom_n);
+		return err;
+	}
+
+	/* The ID of the super block received in mount */
+	sb = zuf_sb_from_id(zri, ioc_iomap.sb_id, ioc_iomap.zus_sbi);
+	if (unlikely(!sb))
+		return -EINVAL;
+
+	if (ioc_iomap.wait_for_done)
+		err = zuf_iom_execute_sync(sb, NULL, user_iomap->ziom.iom_e,
+					   ioc_iomap.ziom.iom_n);
+	else
+		err =  zuf_iom_execute_async(sb, ioc_iomap.ziom.iomb,
+					     user_iomap->ziom.iom_e,
+					     ioc_iomap.ziom.iom_n);
+
+	user_iomap->hdr.err = err;
+	zuf_dbg_core("OUT => %d\n", err);
+	return 0; /* report err at hdr, but the command was executed */
+};
+
 static int _zu_break(struct file *filp, void *parg)
 {
 	struct zuf_root_info *zri = ZRI(filp->f_inode->i_sb);
@@ -928,6 +1003,8 @@ long zufc_ioctl(struct file *file, unsigned int cmd, ulong arg)
 		return _zu_wait(file, parg);
 	case ZU_IOC_ALLOC_BUFFER:
 		return _zu_ebuff_alloc(file, parg);
+	case ZU_IOC_IOMAP_EXEC:
+		return _zu_iomap_exec(file, parg);
 	case ZU_IOC_BREAK_ALL:
 		return _zu_break(file, parg);
 	default:

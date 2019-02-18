@@ -46,13 +46,21 @@ bool zuf_dir_emit(struct super_block *sb, struct dir_context *ctx,
 uint zuf_prepare_symname(struct zufs_ioc_new_inode *ioc_new_inode,
 			const char *symname, ulong len, struct page *pages[2]);
 
-
 /* rw.c */
+int _zuf_get_put_block(struct zuf_sb_info *sbi, struct zuf_inode_info *zii,
+			  enum e_zufs_operation op, int rw, ulong index,
+			  struct zufs_ioc_IO *get_block);
+int zuf_rw_read_page(struct zuf_sb_info *sbi, struct inode *inode,
+		     struct page *page, u64 filepos);
 ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
 			 struct kiocb *kiocb, struct iov_iter *ii);
 ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
 			  struct kiocb *kiocb, struct iov_iter *ii);
 int zuf_trim_edge(struct inode *inode, ulong filepos, uint len);
+int zuf_iom_execute_sync(struct super_block *sb, struct inode *inode,
+			 __u64 *iom_e, uint iom_n);
+int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
+			 __u64 *iom_e_user, uint iom_n);
 
 /* super.c */
 int zuf_init_inodecache(void);
@@ -60,6 +68,9 @@ void zuf_destroy_inodecache(void);
 
 struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 			 const char *dev_name, void *data);
+
+struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
+				   struct zus_sb_info *zus_sbi);
 
 /* zuf-core.c */
 int zufc_zts_init(struct zuf_root_info *zri); /* Some private types in core */
