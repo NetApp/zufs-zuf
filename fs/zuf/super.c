@@ -414,6 +414,7 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_flags |= MS_NOSEC | (ioc_mount->zmi.acl_on ? SB_POSIXACL : 0);
 
 	sb->s_op = &zuf_sops;
+	sb->s_xattr = zuf_xattr_handlers;
 
 	root_i = zuf_iget(sb, ioc_mount->zmi.zus_ii, ioc_mount->zmi._zi,
 			  &exist);

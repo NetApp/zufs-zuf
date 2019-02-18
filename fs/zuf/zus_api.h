@@ -351,6 +351,9 @@ enum e_zufs_operation {
 	ZUFS_OP_FALLOCATE,
 	ZUFS_OP_LLSEEK,
 	ZUFS_OP_IOCTL,
+	ZUFS_OP_XATTR_GET,
+	ZUFS_OP_XATTR_SET,
+	ZUFS_OP_XATTR_LIST,
 
 	ZUFS_OP_BREAK,		/* Kernel telling Server to exit */
 	ZUFS_OP_MAX_OPT,
@@ -601,6 +604,25 @@ struct zufs_ioc_ioctl {
 		char arg[0];
 	};
 };
+
+/* xattr ioc_flags */
+#define ZUFS_XATTR_SET_EMPTY	(1 << 0)
+#define ZUFS_XATTR_TRUSTED	(1 << 1)
+
+/* ZUFS_OP_XATTR */
+struct zufs_ioc_xattr {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u32	flags;
+	__u32	type;
+	__u16	name_len;
+	__u16	ioc_flags;
+
+	/* OUT */
+	__u32	user_buf_size;
+	char	buf[0];
+} __packed;
 
 /* ~~~~ io_map structures && IOCTL(s) ~~~~ */
 /*

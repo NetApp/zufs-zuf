@@ -70,4 +70,5 @@ const struct inode_operations zuf_symlink_inode_operations = {
 	.update_time	= zuf_update_time,
 	.setattr	= zuf_setattr,
 	.getattr	= zuf_getattr,
+	.listxattr	= zuf_listxattr,
 };

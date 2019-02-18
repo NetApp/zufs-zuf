@@ -73,6 +73,16 @@ int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
 /* file.c */
 int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync);
 
+/* xattr.c */
+int zuf_initxattrs(struct inode *inode, const struct xattr *xattr_array,
+		   void *fs_info);
+ssize_t __zuf_getxattr(struct inode *inode, int type, const char *name,
+		       void *buffer, size_t size);
+int __zuf_setxattr(struct inode *inode, int type, const char *name,
+		   const void *value, size_t size, int flags);
+ssize_t zuf_listxattr(struct dentry *dentry, char *buffer, size_t size);
+extern const struct xattr_handler *zuf_xattr_handlers[];
+
 
 /* super.c */
 int zuf_init_inodecache(void);

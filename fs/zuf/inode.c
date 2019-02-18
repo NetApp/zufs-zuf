@@ -361,7 +361,8 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 
 	zuf_dbg_verbose("inode=%p name=%s\n", inode, qstr->name);
 
-	err = security_inode_init_security(inode, dir, qstr, NULL, NULL);
+	err = security_inode_init_security(inode, dir, qstr, zuf_initxattrs,
+					   NULL);
 	if (err && err != -EOPNOTSUPP)
 		goto fail;
 

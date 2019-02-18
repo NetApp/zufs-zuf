@@ -328,6 +328,13 @@ static inline void *zuf_dpp_t_addr(struct super_block *sb, zu_dpp_t v)
 	return md_addr_verify(SBI(sb)->md, zu_dpp_t_val(v));
 }
 
+/* xattr types */
+enum {	ZUF_XF_SECURITY    = 1,
+	ZUF_XF_SYSTEM      = 2,
+	ZUF_XF_TRUSTED     = 3,
+	ZUF_XF_USER        = 4,
+};
+
 enum big_alloc_type { ba_stack, ba_kmalloc, ba_vmalloc };
 
 static inline
