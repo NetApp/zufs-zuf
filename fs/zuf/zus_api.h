@@ -268,10 +268,20 @@ struct zufs_mount_info {
 	struct zufs_parse_options po;
 };
 
+struct zufs_ddbg_info {
+	__u64 id; /* IN where to start from, OUT last ID */
+	/* IN size of buffer, OUT size of dynamic debug message */
+	__u64 len;
+	char msg[0];
+};
+
 /* mount / umount */
 struct  zufs_ioc_mount {
 	struct zufs_ioc_hdr hdr;
-	struct zufs_mount_info zmi;
+	union {
+		struct zufs_mount_info zmi;
+		struct zufs_ddbg_info zdi;
+	};
 };
 #define ZU_IOC_MOUNT	_IOWR('Z', 11, struct zufs_ioc_mount)
 
