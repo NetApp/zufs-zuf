@@ -164,6 +164,32 @@ static int zuf_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
 	return 0;
 }
 
+static int zuf_symlink(struct inode *dir, struct dentry *dentry,
+		       const char *symname)
+{
+	struct inode *inode;
+	ulong len;
+
+	zuf_dbg_vfs("[%ld] de->name=%s symname=%s\n",
+			dir->i_ino, dentry->d_name.name, symname);
+
+	len = strlen(symname);
+	if (len + 1 > ZUFS_MAX_SYMLINK)
+		return -ENAMETOOLONG;
+
+	inode = zuf_new_inode(dir, S_IFLNK|S_IRWXUGO, &dentry->d_name,
+			       symname, len, false);
+	if (IS_ERR(inode))
+		return PTR_ERR(inode);
+
+	inode->i_op = &zuf_symlink_inode_operations;
+	inode->i_mapping->a_ops = &zuf_aops;
+
+	_instantiate_unlock(dentry, inode);
+
+	return 0;
+}
+
 static int zuf_link(struct dentry *dest_dentry, struct inode *dir,
 		    struct dentry *dentry)
 {
@@ -385,6 +411,7 @@ const struct inode_operations zuf_dir_inode_operations = {
 	.lookup		= zuf_lookup,
 	.link		= zuf_link,
 	.unlink		= zuf_unlink,
+	.symlink	= zuf_symlink,
 	.mkdir		= zuf_mkdir,
 	.rmdir		= zuf_rmdir,
 	.mknod		= zuf_mknod,

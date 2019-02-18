@@ -18,5 +18,5 @@ zuf-y += zuf-core.o zuf-root.o
 
 # Main FS
 zuf-y += rw.o
-zuf-y += super.o inode.o directory.o namei.o file.o
+zuf-y += super.o inode.o directory.o namei.o file.o symlink.o
 zuf-y += module.o

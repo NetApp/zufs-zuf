@@ -338,6 +338,7 @@ enum e_zufs_operation {
 	ZUFS_OP_RENAME,
 	ZUFS_OP_READDIR,
 
+	ZUFS_OP_GET_SYMLINK,
 	ZUFS_OP_SETATTR,
 
 	ZUFS_OP_BREAK,		/* Kernel telling Server to exit */

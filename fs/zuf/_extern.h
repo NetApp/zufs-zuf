@@ -42,6 +42,10 @@ void zuf_set_inode_flags(struct inode *inode, struct zus_inode *zi);
 bool zuf_dir_emit(struct super_block *sb, struct dir_context *ctx,
 		  ulong ino, const char *name, int length);
 
+/* symlink.c */
+uint zuf_prepare_symname(struct zufs_ioc_new_inode *ioc_new_inode,
+			const char *symname, ulong len, struct page *pages[2]);
+
 
 /* rw.c */
 int zuf_trim_edge(struct inode *inode, ulong filepos, uint len);
@@ -104,5 +108,8 @@ void zuf_zii_sync(struct inode *inode, bool sync_nlink);
 /* namei.c */
 extern const struct inode_operations zuf_dir_inode_operations;
 extern const struct inode_operations zuf_special_inode_operations;
+
+/* symlink.c */
+extern const struct inode_operations zuf_symlink_inode_operations;
 
 #endif	/*ndef __ZUF_EXTERN_H__*/
