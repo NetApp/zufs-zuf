@@ -88,6 +88,10 @@ void zuf_set_inode_flags(struct inode *inode, struct zus_inode *zi);
 int zuf_add_dentry(struct inode *dir, struct qstr *str, struct inode *inode);
 int zuf_remove_dentry(struct inode *dir, struct qstr *str, struct inode *inode);
 
+/* symlink.c */
+uint zuf_prepare_symname(struct zufs_ioc_new_inode *ioc_new_inode,
+			const char *symname, ulong len, struct page *pages[2]);
+
 /* t1.c */
 int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);
 
@@ -108,5 +112,8 @@ extern const struct inode_operations zuf_special_inode_operations;
 
 /* dir.c */
 extern const struct file_operations zuf_dir_operations;
+
+/* symlink.c */
+extern const struct inode_operations zuf_symlink_inode_operations;
 
 #endif	/*ndef __ZUF_EXTERN_H__*/
