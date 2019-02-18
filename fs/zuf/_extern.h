@@ -46,6 +46,10 @@ bool zuf_dir_emit(struct super_block *sb, struct dir_context *ctx,
 uint zuf_prepare_symname(struct zufs_ioc_new_inode *ioc_new_inode,
 			const char *symname, ulong len, struct page *pages[2]);
 
+
+/* mmap.c */
+int zuf_file_mmap(struct file *file, struct vm_area_struct *vma);
+
 /* rw.c */
 int _zuf_get_put_block(struct zuf_sb_info *sbi, struct zuf_inode_info *zii,
 			  enum e_zufs_operation op, int rw, ulong index,
@@ -61,10 +65,16 @@ int zuf_iom_execute_sync(struct super_block *sb, struct inode *inode,
 			 __u64 *iom_e, uint iom_n);
 int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
 			 __u64 *iom_e_user, uint iom_n);
+/* file.c */
+int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync);
+
 
 /* super.c */
 int zuf_init_inodecache(void);
 void zuf_destroy_inodecache(void);
+
+void zuf_sync_inc(struct inode *inode);
+void zuf_sync_dec(struct inode *inode, ulong write_unmapped);
 
 struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 			 const char *dev_name, void *data);

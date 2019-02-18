@@ -45,6 +45,7 @@
 #define zuf_dbg_t2(s, args ...)		zuf_chan_debug("t2dbg", s, ##args)
 #define zuf_dbg_t2_rw(s, args ...)	zuf_chan_debug("t2grw", s, ##args)
 #define zuf_dbg_core(s, args ...)	zuf_chan_debug("core ", s, ##args)
+#define zuf_dbg_mmap(s, args ...)	zuf_chan_debug("mmap ", s, ##args)
 #define zuf_dbg_zus(s, args ...)	zuf_chan_debug("zusdg", s, ##args)
 #define zuf_dbg_verbose(s, args ...)	zuf_chan_debug("d-oto", s, ##args)
 

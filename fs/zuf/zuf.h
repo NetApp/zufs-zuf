@@ -158,6 +158,9 @@ struct zuf_inode_info {
 
 	/* Stuff for mmap write */
 	struct rw_semaphore	in_sync;
+	struct list_head	i_mmap_dirty;
+	atomic_t		write_mapped;
+	atomic_t		vma_count;
 	struct page		*zero_page; /* TODO: Remove */
 
 	/* cookies from Server */

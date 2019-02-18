@@ -344,8 +344,10 @@ enum e_zufs_operation {
 	ZUFS_OP_WRITE,
 	ZUFS_OP_GET_BLOCK,
 	ZUFS_OP_PUT_BLOCK,
+	ZUFS_OP_MMAP_CLOSE,
 	ZUFS_OP_GET_SYMLINK,
 	ZUFS_OP_SETATTR,
+	ZUFS_OP_SYNC,
 	ZUFS_OP_FALLOCATE,
 	ZUFS_OP_LLSEEK,
 
@@ -515,6 +517,13 @@ static inline bool zufs_zde_emit(struct zufs_readdir_iter *rdi, __u64 ino,
 
 	return true;
 }
+
+struct zufs_ioc_mmap_close {
+	struct zufs_ioc_hdr hdr;
+	 /* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 rw; /* Some flags + READ or WRITE */
+};
 
 /* ZUFS_OP_GET_SYMLINK */
 struct zufs_ioc_get_link {
