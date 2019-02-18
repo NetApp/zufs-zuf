@@ -454,6 +454,7 @@ enum e_zufs_operation {
 	ZUFS_OP_ADD_DENTRY	= 8,
 	ZUFS_OP_REMOVE_DENTRY	= 9,
 	ZUFS_OP_RENAME		= 10,
+	ZUFS_OP_READDIR		= 11,
 
 	ZUFS_OP_SETATTR		= 19,
 
@@ -548,6 +549,93 @@ struct zufs_ioc_rename {
 	__u64 time;
 	__u64 flags;
 };
+
+/* ZUFS_OP_READDIR */
+struct zufs_ioc_readdir {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *dir_ii;
+	__u64 pos;
+
+	/* OUT */
+	__u8	more;
+};
+
+struct zufs_dir_entry {
+	__le64 ino;
+	struct {
+		unsigned	type	: 8;
+		ulong		pos	: 56;
+	};
+	struct zufs_str zstr;
+};
+
+struct zufs_readdir_iter {
+	void *__zde, *last;
+	struct zufs_ioc_readdir *ioc_readdir;
+};
+
+enum {E_ZDE_HDR_SIZE =
+	offsetof(struct zufs_dir_entry, zstr) + offsetof(struct zufs_str, name),
+};
+
+#ifndef __cplusplus
+static inline void zufs_readdir_iter_init(struct zufs_readdir_iter *rdi,
+					  struct zufs_ioc_readdir *ioc_readdir,
+					  void *app_ptr)
+{
+	rdi->__zde = app_ptr;
+	rdi->last = app_ptr + ioc_readdir->hdr.len;
+	rdi->ioc_readdir = ioc_readdir;
+	ioc_readdir->more = false;
+}
+
+static inline uint zufs_dir_entry_len(__u8 name_len)
+{
+	return ALIGN(E_ZDE_HDR_SIZE + name_len, sizeof(__u64));
+}
+
+static inline
+struct zufs_dir_entry *zufs_next_zde(struct zufs_readdir_iter *rdi)
+{
+	struct zufs_dir_entry *zde = rdi->__zde;
+	uint len;
+
+	if (rdi->last <= rdi->__zde + E_ZDE_HDR_SIZE)
+		return NULL;
+	if (zde->zstr.len == 0)
+		return NULL;
+	len = zufs_dir_entry_len(zde->zstr.len);
+	if (rdi->last <= rdi->__zde + len)
+		return NULL;
+
+	rdi->__zde += len;
+	return zde;
+}
+
+static inline bool zufs_zde_emit(struct zufs_readdir_iter *rdi, __u64 ino,
+				 __u8 type, __u64 pos, const char *name,
+				 __u8 len)
+{
+	struct zufs_dir_entry *zde = rdi->__zde;
+
+	if (rdi->last <= rdi->__zde + zufs_dir_entry_len(len)) {
+		rdi->ioc_readdir->more = true;
+		return false;
+	}
+
+	rdi->ioc_readdir->more = 0;
+	zde->ino = ino;
+	zde->type = type;
+	/*ASSERT(0 == (pos && (1 << 56 - 1)));*/
+	zde->pos = pos;
+	strncpy(zde->zstr.name, name, len);
+	zde->zstr.len = len;
+	zufs_next_zde(rdi);
+
+	return true;
+}
+#endif /* ndef __cplusplus */
 
 /* ZUFS_OP_SETATTR */
 struct zufs_ioc_attr {
