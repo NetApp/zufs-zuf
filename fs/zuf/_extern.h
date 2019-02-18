@@ -20,6 +20,10 @@
  * extern functions declarations
  */
 
+/* inode.c */
+struct inode *zuf_iget(struct super_block *sb, struct zus_inode_info *zus_ii,
+		       zu_dpp_t _zi, bool *exist);
+
 /* super.c */
 int zuf_init_inodecache(void);
 void zuf_destroy_inodecache(void);

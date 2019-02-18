@@ -18,7 +18,574 @@
 
 #include "zuf.h"
 
+static struct super_operations zuf_sops;
 static struct kmem_cache *zuf_inode_cachep;
+
+enum {
+	Opt_uid,
+	Opt_gid,
+	Opt_pedantic,
+	Opt_ephemeral,
+	Opt_dax,
+	Opt_err
+};
+
+static const match_table_t tokens = {
+	{ Opt_pedantic,		"pedantic"		},
+	{ Opt_pedantic,		"pedantic=%d"		},
+	{ Opt_ephemeral,	"ephemeral"		},
+	{ Opt_dax,		"dax"			},
+	{ Opt_err,		NULL			},
+};
+
+static int _parse_options(struct zuf_sb_info *sbi, const char *data,
+			  bool remount, struct zufs_parse_options *po)
+{
+	char *orig_options, *options;
+	char *p;
+	substring_t args[MAX_OPT_ARGS];
+	int err = 0;
+	bool ephemeral = false;
+	size_t mount_options_len = 0;
+
+	/* no options given */
+	if (!data)
+		return 0;
+
+	options = orig_options = kstrdup(data, GFP_KERNEL);
+	if (!options)
+		return -ENOMEM;
+
+	while ((p = strsep(&options, ",")) != NULL) {
+		int token;
+
+		if (!*p)
+			continue;
+
+		/* Initialize args struct so we know whether arg was found */
+		args[0].to = args[0].from = NULL;
+		token = match_token(p, tokens, args);
+		switch (token) {
+		case Opt_pedantic:
+			if (!args[0].from) {
+				po->mount_flags |= ZUFS_M_PEDANTIC;
+				set_opt(sbi, PEDANTIC);
+				continue;
+			}
+			if (match_int(&args[0], &po->pedantic))
+				goto bad_opt;
+			break;
+		case Opt_ephemeral:
+			po->mount_flags |= ZUFS_M_EPHEMERAL;
+			set_opt(sbi, EPHEMERAL);
+			ephemeral = true;
+			break;
+		case Opt_dax:
+			set_opt(sbi, DAX);
+			break;
+		default: {
+			if (mount_options_len != 0) {
+				po->mount_options[mount_options_len] = ',';
+				mount_options_len++;
+			}
+			strcat(po->mount_options, p);
+			mount_options_len += strlen(p);
+		}
+		}
+	}
+
+	if (remount && test_opt(sbi, EPHEMERAL) && (ephemeral == false))
+		clear_opt(sbi, EPHEMERAL);
+out:
+	kfree(orig_options);
+	return err;
+
+bad_opt:
+	zuf_warn_cnd(test_opt(sbi, SILENT), "Bad mount option: \"%s\"\n", p);
+	err = -EINVAL;
+	goto out;
+}
+
+static int _print_tier_info(struct multi_devices *md, char **buff, int start,
+			    int count, int *_space, char *str)
+{
+	int space = *_space;
+	char *b = *buff;
+	int printed;
+	int i;
+
+	printed = snprintf(b, space, str);
+	if (unlikely(printed > space))
+		return -ENOSPC;
+
+	b += printed;
+	space -= printed;
+
+	for (i = start; i < start + count; ++i) {
+		printed = snprintf(b, space, "%s%s", i == start ? "" : ",",
+				   _bdev_name(md_dev_info(md, i)->bdev));
+
+		if (unlikely(printed > space))
+			return -ENOSPC;
+
+		b += printed;
+		space -= printed;
+	}
+	*_space = space;
+	*buff = b;
+
+	return 0;
+}
+
+static void _print_mount_info(struct zuf_sb_info *sbi, char *mount_options)
+{
+	struct multi_devices *md = sbi->md;
+	char buff[992];
+	int space = sizeof(buff);
+	char *b = buff;
+	int err;
+
+	err = _print_tier_info(md, &b, 0, md->t1_count, &space, "t1=");
+	if (unlikely(err))
+		goto no_space;
+
+	if (md->t2_count == 0)
+		goto print_options;
+
+	err = _print_tier_info(md, &b, md->t1_count, md->t2_count, &space,
+			       " t2=");
+	if (unlikely(err))
+		goto no_space;
+
+print_options:
+	if (mount_options) {
+		int printed = snprintf(b, space, " -o %s", mount_options);
+
+		if (unlikely(printed > space))
+			goto no_space;
+	}
+
+print:
+	zuf_info("mounted %s (0x%lx/0x%lx)\n", buff,
+		 md_t1_blocks(sbi->md), md_t2_blocks(sbi->md));
+	return;
+
+no_space:
+	snprintf(buff + sizeof(buff) - 4, 4, "...");
+	goto print;
+}
+
+static void _sb_mwtime_now(struct super_block *sb, struct md_dev_table *zdt)
+{
+	struct timespec64 now = current_time(sb->s_root->d_inode);
+
+	timespec_to_mt(&zdt->s_mtime, &now);
+	zdt->s_wtime = zdt->s_mtime;
+	/* TOZO _persist_md(sb, &zdt->s_mtime, 2*sizeof(zdt->s_mtime)); */
+}
+
+static int _setup_bdi(struct super_block *sb, const char *device_name)
+{
+	int err;
+
+	if (sb->s_bdi && (sb->s_bdi != &noop_backing_dev_info)) {
+		/*
+		 * sb->s_bdi points to blkdev's bdi however we want to redirect
+		 * it to our private bdi...
+		 */
+		bdi_put(sb->s_bdi);
+	}
+	sb->s_bdi = &noop_backing_dev_info;
+
+	err = super_setup_bdi_name(sb, "zuf-%s", device_name);
+	if (unlikely(err)) {
+		zuf_err("Failed to super_setup_bdi\n");
+		return err;
+	}
+
+	sb->s_bdi->ra_pages = ZUFS_READAHEAD_PAGES;
+	sb->s_bdi->capabilities = BDI_CAP_NO_ACCT_AND_WRITEBACK;
+	return 0;
+}
+
+static int _sb_add(struct zuf_root_info *zri, struct super_block *sb,
+		   __u64 *sb_id)
+{
+	uint i;
+	int err;
+
+	mutex_lock(&zri->sbl_lock);
+
+	if (zri->sbl.num == zri->sbl.max) {
+		struct super_block **new_array;
+
+		new_array = krealloc(zri->sbl.array,
+				  (zri->sbl.max + SBL_INC) * sizeof(*new_array),
+				  GFP_KERNEL | __GFP_ZERO);
+		if (unlikely(!new_array)) {
+			err = -ENOMEM;
+			goto out;
+		}
+		zri->sbl.max += SBL_INC;
+		zri->sbl.array = new_array;
+	}
+
+	for (i = 0; i < zri->sbl.max; ++i)
+		if (!zri->sbl.array[i])
+			break;
+
+	if (unlikely(i == zri->sbl.max)) {
+		zuf_err("!!!!! can't be! i=%d g_sbl.num=%d g_sbl.max=%d\n",
+			i, zri->sbl.num, zri->sbl.max);
+		err = -EFAULT;
+		goto out;
+	}
+
+	++zri->sbl.num;
+	zri->sbl.array[i] = sb;
+	*sb_id = i + 1;
+	err = 0;
+
+	zuf_dbg_vfs("sb_id=%lld\n", *sb_id);
+out:
+	mutex_unlock(&zri->sbl_lock);
+	return err;
+}
+
+static void _sb_remove(struct zuf_root_info *zri, struct super_block *sb)
+{
+	uint i;
+
+	mutex_lock(&zri->sbl_lock);
+
+	for (i = 0; i < zri->sbl.max; ++i)
+		if (zri->sbl.array[i] == sb)
+			break;
+	if (unlikely(i == zri->sbl.max)) {
+		zuf_err("!!!!! can't be! i=%d g_sbl.num=%d g_sbl.max=%d\n",
+			i, zri->sbl.num, zri->sbl.max);
+		goto out;
+	}
+
+	zri->sbl.array[i] = NULL;
+	--zri->sbl.num;
+out:
+	mutex_unlock(&zri->sbl_lock);
+}
+
+struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
+				   struct zus_sb_info *zus_sbi)
+{
+	struct super_block *sb;
+
+	--sb_id;
+
+	if (zri->sbl.max <= sb_id) {
+		zuf_err("Invalid SB_ID 0x%llx\n", sb_id);
+		return NULL;
+	}
+
+	sb = zri->sbl.array[sb_id];
+	if (!sb) {
+		zuf_err("Stale SB_ID 0x%llx\n", sb_id);
+		return NULL;
+	}
+
+	return sb;
+}
+
+static void zuf_put_super(struct super_block *sb)
+{
+	struct zuf_sb_info *sbi = SBI(sb);
+
+	if (sbi->zus_sbi) {
+		struct zufs_ioc_mount zim = {
+			.zmi.zus_sbi = sbi->zus_sbi,
+		};
+
+		zufc_dispatch_mount(ZUF_ROOT(sbi), NULL, ZUFS_M_UMOUNT, &zim);
+		sbi->zus_sbi = NULL;
+	}
+
+	/* NOTE!!! this is a HACK! we should not touch the s_umount
+	 * lock but to make lockdep happy we do that since our devices
+	 * are held exclusivly. Need to revisit every kernel version
+	 * change.
+	 */
+	if (sbi->md) {
+		up_write(&sb->s_umount);
+		zuf_rm_pmem(sbi->md);
+		md_fini(sbi->md, sb->s_bdev);
+		down_write(&sb->s_umount);
+	}
+
+	_sb_remove(ZUF_ROOT(sbi), sb);
+	sb->s_fs_info = NULL;
+	if (!test_opt(sbi, FAILED))
+		zuf_info("unmounted /dev/%s\n", _bdev_name(sb->s_bdev));
+	kfree(sbi);
+}
+
+struct __fill_super_params {
+	struct multi_devices *md;
+	char *mount_options;
+};
+
+static int zuf_fill_super(struct super_block *sb, void *data, int silent)
+{
+	struct zuf_sb_info *sbi = NULL;
+	struct __fill_super_params *fsp = data;
+	struct zufs_ioc_mount zim = {};
+	struct zufs_ioc_mount *ioc_mount;
+	enum big_alloc_type bat;
+	struct register_fs_info *rfi;
+	struct inode *root_i;
+	size_t zim_size, mount_options_len;
+	bool exist;
+	int err;
+
+	BUILD_BUG_ON(sizeof(struct md_dev_table) > MDT_SIZE);
+	BUILD_BUG_ON(sizeof(struct zus_inode) != ZUFS_INODE_SIZE);
+
+	mount_options_len = (fsp->mount_options ?
+					strlen(fsp->mount_options) : 0) + 1;
+	zim_size = sizeof(zim) + mount_options_len;
+	ioc_mount = big_alloc(zim_size, sizeof(zim), &zim,
+			      GFP_KERNEL | __GFP_ZERO, &bat);
+	if (unlikely(!ioc_mount))
+		return -ENOMEM;
+
+	ioc_mount->zmi.po.mount_options_len = mount_options_len;
+
+	err = _sb_add(zuf_fst(sb)->zri, sb, &ioc_mount->zmi.sb_id);
+	if (unlikely(err))
+		goto error;
+
+	sbi = kzalloc(sizeof(struct zuf_sb_info), GFP_KERNEL);
+	if (!sbi) {
+		zuf_err_cnd(silent, "Not enough memory to allocate sbi\n");
+		err = -ENOMEM;
+		goto error;
+	}
+	sb->s_fs_info = sbi;
+	sbi->sb = sb;
+
+	/* Initialize embedded objects */
+	spin_lock_init(&sbi->s_mmap_dirty_lock);
+	INIT_LIST_HEAD(&sbi->s_mmap_dirty);
+	if (silent) {
+		ioc_mount->zmi.po.mount_flags |= ZUFS_M_SILENT;
+		set_opt(sbi, SILENT);
+	}
+
+	sbi->md = fsp->md;
+	err = md_set_sb(sbi->md, sb->s_bdev, sb, silent);
+	if (unlikely(err))
+		goto error;
+	zuf_add_pmem(zuf_fst(sb)->zri, sbi->md);
+
+	err = _parse_options(sbi, fsp->mount_options, 0, &ioc_mount->zmi.po);
+	if (err)
+		goto error;
+
+	err = _setup_bdi(sb, _bdev_name(sb->s_bdev));
+	if (err) {
+		zuf_err_cnd(silent, "Failed to setup bdi => %d\n", err);
+		goto error;
+	}
+
+	/* Tell ZUS to mount an FS for us */
+	ioc_mount->zmi.pmem_kern_id = zuf_pmem_id(sbi->md);
+	err = zufc_dispatch_mount(ZUF_ROOT(sbi), zuf_fst(sb)->zus_zfi,
+				  ZUFS_M_MOUNT, ioc_mount);
+	if (unlikely(err))
+		goto error;
+	sbi->zus_sbi = ioc_mount->zmi.zus_sbi;
+
+	/* Init with default values */
+	sb->s_blocksize_bits = ioc_mount->zmi.s_blocksize_bits;
+	sb->s_blocksize = 1 << ioc_mount->zmi.s_blocksize_bits;
+
+	rfi = &zuf_fst(sb)->rfi;
+
+	sb->s_magic = rfi->FS_magic;
+	sb->s_time_gran = rfi->s_time_gran;
+	sb->s_maxbytes = rfi->s_maxbytes;
+	sb->s_flags |= MS_NOSEC | (ioc_mount->zmi.acl_on ? SB_POSIXACL : 0);
+
+	sb->s_op = &zuf_sops;
+
+	root_i = zuf_iget(sb, ioc_mount->zmi.zus_ii, ioc_mount->zmi._zi,
+			  &exist);
+	if (IS_ERR(root_i)) {
+		err = PTR_ERR(root_i);
+		goto error;
+	}
+	WARN_ON(exist);
+
+	sb->s_root = d_make_root(root_i);
+	if (!sb->s_root) {
+		zuf_err_cnd(silent, "get tozu root inode failed\n");
+		iput(root_i); /* undo zuf_iget */
+		err = -ENOMEM;
+		goto error;
+	}
+
+	if (!zuf_rdonly(sb))
+		_sb_mwtime_now(sb, md_zdt(sbi->md));
+
+	mt_to_timespec(&root_i->i_ctime, &zus_zi(root_i)->i_ctime);
+	mt_to_timespec(&root_i->i_mtime, &zus_zi(root_i)->i_mtime);
+
+	_print_mount_info(sbi, fsp->mount_options);
+	clear_opt(sbi, SILENT);
+	big_free(ioc_mount, bat);
+	return 0;
+
+error:
+	zuf_warn("NOT mounting => %d\n", err);
+	if (sbi) {
+		set_opt(sbi, FAILED);
+		zuf_put_super(sb);
+	}
+	big_free(ioc_mount, bat);
+	return err;
+}
+
+static void _zst_to_kst(const struct statfs64 *zst, struct kstatfs *kst)
+{
+	kst->f_type	= zst->f_type;
+	kst->f_bsize	= zst->f_bsize;
+	kst->f_blocks	= zst->f_blocks;
+	kst->f_bfree	= zst->f_bfree;
+	kst->f_bavail	= zst->f_bavail;
+	kst->f_files	= zst->f_files;
+	kst->f_ffree	= zst->f_ffree;
+	kst->f_fsid	= zst->f_fsid;
+	kst->f_namelen	= zst->f_namelen;
+	kst->f_frsize	= zst->f_frsize;
+	kst->f_flags	= zst->f_flags;
+}
+
+static int zuf_statfs(struct dentry *d, struct kstatfs *buf)
+{
+	struct zuf_sb_info *sbi = SBI(d->d_sb);
+	struct zufs_ioc_statfs ioc_statfs = {
+		.hdr.in_len = offsetof(struct zufs_ioc_statfs, statfs_out),
+		.hdr.out_len = sizeof(ioc_statfs),
+		.hdr.operation = ZUFS_OP_STATFS,
+		.zus_sbi = sbi->zus_sbi,
+	};
+	int err;
+
+	err = zufc_dispatch(ZUF_ROOT(sbi), &ioc_statfs.hdr, NULL, 0);
+	if (unlikely(err && err != -EINTR)) {
+		zuf_err("zufc_dispatch failed op=ZUFS_OP_STATFS => %d\n", err);
+		return err;
+	}
+
+	_zst_to_kst(&ioc_statfs.statfs_out, buf);
+	return 0;
+}
+
+static int zuf_show_options(struct seq_file *seq, struct dentry *root)
+{
+	struct zuf_sb_info *sbi = SBI(root->d_sb);
+
+	if (test_opt(sbi, EPHEMERAL))
+		seq_puts(seq, ",ephemeral");
+	if (test_opt(sbi, DAX))
+		seq_puts(seq, ",dax");
+
+	return 0;
+}
+
+static int zuf_show_devname(struct seq_file *seq, struct dentry *root)
+{
+	seq_printf(seq, "/dev/%s", _bdev_name(root->d_sb->s_bdev));
+
+	return 0;
+}
+
+static int zuf_remount(struct super_block *sb, int *mntflags, char *data)
+{
+	struct zuf_sb_info *sbi = SBI(sb);
+	struct zufs_ioc_mount zim = {};
+	struct zufs_ioc_mount *ioc_mount;
+	size_t remount_options_len, zim_size;
+	enum big_alloc_type bat;
+	int err;
+
+	zuf_info("remount... -o %s\n", data);
+
+	remount_options_len = data ? (strlen(data) + 1) : 0;
+	zim_size = sizeof(zim) + remount_options_len;
+	ioc_mount = big_alloc(zim_size, sizeof(zim), &zim,
+			      GFP_KERNEL | __GFP_ZERO, &bat);
+	if (unlikely(!ioc_mount))
+		return -ENOMEM;
+
+	ioc_mount->zmi.zus_sbi = sbi->zus_sbi,
+	ioc_mount->zmi.remount_flags = zuf_rdonly(sb) ? ZUFS_REM_WAS_RO : 0;
+	ioc_mount->zmi.po.mount_options_len = remount_options_len;
+
+	/* Store the old options */
+	ioc_mount->zmi.old_mount_opt = sbi->s_mount_opt;
+
+	err = _parse_options(sbi, data, 1, &ioc_mount->zmi.po);
+	if (unlikely(err))
+		goto fail;
+
+	if (*mntflags & MS_RDONLY) {
+		ioc_mount->zmi.remount_flags |= ZUFS_REM_WILL_RO;
+
+		if (!zuf_rdonly(sb))
+			_sb_mwtime_now(sb, md_zdt(sbi->md));
+	} else if (zuf_rdonly(sb)) {
+		_sb_mwtime_now(sb, md_zdt(sbi->md));
+	}
+
+	err = zufc_dispatch_mount(ZUF_ROOT(sbi), zuf_fst(sb)->zus_zfi,
+				  ZUFS_M_REMOUNT, ioc_mount);
+	if (unlikely(err))
+		goto fail;
+
+	big_free(ioc_mount, bat);
+	return 0;
+
+fail:
+	sbi->s_mount_opt = ioc_mount->zmi.old_mount_opt;
+	big_free(ioc_mount, bat);
+	zuf_dbg_err("remount failed restore option\n");
+	return err;
+}
+
+static int zuf_update_s_wtime(struct super_block *sb)
+{
+	if (!(sb->s_flags & MS_RDONLY)) {
+		struct timespec64 now = current_time(sb->s_root->d_inode);
+
+		timespec_to_mt(&md_zdt(SBI(sb)->md)->s_wtime, &now);
+	}
+	return 0;
+}
+
+static struct inode *zuf_alloc_inode(struct super_block *sb)
+{
+	struct zuf_inode_info *zii;
+
+	zii = kmem_cache_alloc(zuf_inode_cachep, GFP_NOFS);
+	if (!zii)
+		return NULL;
+
+	zii->vfs_inode.i_version.counter = 1;
+	return &zii->vfs_inode;
+}
+
+static void zuf_destroy_inode(struct inode *inode)
+{
+	kmem_cache_free(zuf_inode_cachep, ZUII(inode));
+}
 
 static void _init_once(void *foo)
 {
@@ -46,8 +613,62 @@ void zuf_destroy_inodecache(void)
 	kmem_cache_destroy(zuf_inode_cachep);
 }
 
+static struct super_operations zuf_sops = {
+	.alloc_inode	= zuf_alloc_inode,
+	.destroy_inode	= zuf_destroy_inode,
+	.put_super	= zuf_put_super,
+	.freeze_fs	= zuf_update_s_wtime,
+	.unfreeze_fs	= zuf_update_s_wtime,
+	.statfs		= zuf_statfs,
+	.remount_fs	= zuf_remount,
+	.show_options	= zuf_show_options,
+	.show_devname	= zuf_show_devname,
+};
+
 struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 			 const char *dev_name, void *data)
 {
-	return ERR_PTR(-ENOTSUPP);
+	int silent = flags & MS_SILENT ? 1 : 0;
+	struct __fill_super_params fsp = {
+		.mount_options = data,
+	};
+	struct zuf_fs_type *fst = ZUF_FST(fs_type);
+	struct register_fs_info *rfi = &fst->rfi;
+	struct mdt_check mc = {
+		.alloc_mask	= ZUFS_ALLOC_MASK,
+		.major_ver	= rfi->FS_ver_major,
+		.minor_ver	= rfi->FS_ver_minor,
+		.magic		= rfi->FS_magic,
+
+		.holder = fs_type,
+		.silent = silent,
+	};
+	struct dentry *ret = NULL;
+	const char *dev_path = NULL;
+	int err;
+
+	zuf_dbg_vfs("dev_name=%s, data=%s\n", dev_name, (const char *)data);
+
+	fsp.md = md_alloc(sizeof(struct zuf_pmem));
+	if (IS_ERR(fsp.md)) {
+		err = PTR_ERR(fsp.md);
+		fsp.md = NULL;
+		goto out;
+	}
+
+	err = md_init(fsp.md, dev_name, &mc, &dev_path);
+	if (unlikely(err)) {
+		zuf_err_cnd(silent, "md_init failed! => %d\n", err);
+		goto out;
+	}
+
+	zuf_dbg_vfs("mounting with dev_path=%s\n", dev_path);
+	ret = mount_bdev(fs_type, flags, dev_path, &fsp, zuf_fill_super);
+
+out:
+	if (unlikely(err) && fsp.md)
+		md_fini(fsp.md, NULL);
+
+	kfree(dev_path);
+	return err ? ERR_PTR(err) : ret;
 }

@@ -77,6 +77,8 @@
 #define EZUF_RETRY_DONE 540
 
 
+#define ZUFS_READAHEAD_PAGES	8
+
 /* All device sizes offsets must align on 2M */
 #define ZUFS_ALLOC_MASK		(1024 * 1024 * 2 - 1)
 
@@ -106,6 +108,45 @@ static inline zu_dpp_t enc_zu_dpp_t(ulong v, uint pool)
 {
 	return v | pool;
 }
+
+/*
+ * Structure of a ZUS inode.
+ * This is all the inode fields
+ */
+
+/* zus_inode size */
+#define ZUFS_INODE_SIZE 128    /* must be power of two */
+#define ZUFS_INODE_BITS   7
+
+struct zus_inode {
+	__le16	i_flags;	/* Inode flags */
+	__le16	i_mode;		/* File mode */
+	__le32	i_nlink;	/* Links count */
+	__le64	i_size;		/* Size of data in bytes */
+/* 16*/	struct __zi_on_disk_desc {
+		__le64	a[2];
+	}	i_on_disk;	/* FS-specific on disc placement */
+/* 32*/	__le64	i_blocks;
+	__le64	i_mtime;	/* Inode/data Modification time */
+	__le64	i_ctime;	/* Inode/data Changed time */
+	__le64	i_atime;	/* Data Access time */
+/* 64 - cache-line boundary */
+	__le64	i_ino;		/* Inode number */
+	__le32	i_uid;		/* Owner Uid */
+	__le32	i_gid;		/* Group Id */
+	__le64	i_xattr;	/* FS-specific Extended attribute block */
+	__le64	i_generation;	/* File version (for NFS) */
+/* 96*/	union {
+		__le32	i_rdev;		/* special-inode major/minor etc ...*/
+		u8	i_symlink[32];	/* if i_size < sizeof(i_symlink) */
+		__le64	i_sym_dpp;	/* Link location if long symlink */
+		struct  _zu_dir {
+			__le64	dir_root;
+			__le64  parent;
+		}	i_dir;
+	};
+	/* Total ZUFS_INODE_SIZE bytes always */
+};
 
 /* ~~~~~ ZUFS API ioctl commands ~~~~~ */
 enum {
@@ -174,6 +215,11 @@ enum e_mount_operation {
 	ZUFS_M_REMOUNT,
 	ZUFS_M_DDBG_RD,
 	ZUFS_M_DDBG_WR,
+};
+
+enum {
+	ZUFS_REM_WAS_RO	= 0x00000001,
+	ZUFS_REM_WILL_RO	= 0x00000002,
 };
 
 struct zufs_mount_info {
@@ -269,9 +315,20 @@ struct zufs_ioc_wait_operation {
  */
 enum e_zufs_operation {
 	ZUFS_OP_NULL = 0,
+	ZUFS_OP_STATFS,
 
 	ZUFS_OP_BREAK,		/* Kernel telling Server to exit */
 	ZUFS_OP_MAX_OPT,
+};
+
+/* ZUFS_OP_STATFS */
+struct zufs_ioc_statfs {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_sb_info *zus_sbi;
+
+	/* OUT */
+	struct statfs64 statfs_out;
 };
 
 /* Allocate a special_file that will be a dual-port communication buffer with

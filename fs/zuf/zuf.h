@@ -134,15 +134,58 @@ static inline uint zuf_pmem_id(struct multi_devices *md)
 // void zuf_del_fs_type(struct zuf_root_info *zri, struct zuf_fs_type *zft);
 
 /*
+ * Private Super-block flags
+ */
+enum {
+	ZUF_MOUNT_PEDANTIC	= 0x000001,	/* Check for memory leaks */
+	ZUF_MOUNT_PEDANTIC_SHADOW = 0x00002,	/* */
+	ZUF_MOUNT_SILENT	= 0x000004,	/* verbosity is silent */
+	ZUF_MOUNT_EPHEMERAL	= 0x000008,	/* Don't persist the data */
+	ZUF_MOUNT_FAILED	= 0x000010,	/* mark a failed-mount */
+	ZUF_MOUNT_DAX		= 0x000020,	/* mounted with dax option */
+	ZUF_MOUNT_POSIXACL	= 0x000040,	/* mounted with posix acls */
+};
+
+#define clear_opt(sbi, opt)       (sbi->s_mount_opt &= ~ZUF_MOUNT_ ## opt)
+#define set_opt(sbi, opt)         (sbi->s_mount_opt |= ZUF_MOUNT_ ## opt)
+#define test_opt(sbi, opt)      (sbi->s_mount_opt & ZUF_MOUNT_ ## opt)
+
+/*
  * ZUF per-inode data in memory
  */
 struct zuf_inode_info {
 	struct inode		vfs_inode;
+
+	/* cookies from Server */
+	struct zus_inode	*zi;
+	struct zus_inode_info	*zus_ii;
 };
 
 static inline struct zuf_inode_info *ZUII(struct inode *inode)
 {
 	return container_of(inode, struct zuf_inode_info, vfs_inode);
+}
+
+/*
+ * ZUF super-block data in memory
+ */
+struct zuf_sb_info {
+	struct super_block *sb;
+	struct multi_devices *md;
+
+	/* zus cookie*/
+	struct zus_sb_info *zus_sbi;
+
+	/* Mount options */
+	unsigned long	s_mount_opt;
+
+	spinlock_t		s_mmap_dirty_lock;
+	struct list_head	s_mmap_dirty;
+};
+
+static inline struct zuf_sb_info *SBI(struct super_block *sb)
+{
+	return sb->s_fs_info;
 }
 
 static inline struct zuf_fs_type *ZUF_FST(struct file_system_type *fs_type)
@@ -153,6 +196,85 @@ static inline struct zuf_fs_type *ZUF_FST(struct file_system_type *fs_type)
 static inline struct zuf_fs_type *zuf_fst(struct super_block *sb)
 {
 	return ZUF_FST(sb->s_type);
+}
+
+static inline struct zuf_root_info *ZUF_ROOT(struct zuf_sb_info *sbi)
+{
+	return zuf_fst(sbi->sb)->zri;
+}
+
+static inline bool zuf_rdonly(struct super_block *sb)
+{
+	return sb->s_flags & MS_RDONLY;
+}
+
+static inline struct zus_inode *zus_zi(struct inode *inode)
+{
+	return ZUII(inode)->zi;
+}
+
+static inline void mt_to_timespec(struct timespec64 *t, __le64 *mt)
+{
+	u32 nsec;
+
+	t->tv_sec = div_s64_rem(le64_to_cpu(*mt), NSEC_PER_SEC, &nsec);
+	t->tv_nsec = nsec;
+}
+
+static inline void timespec_to_mt(__le64 *mt, struct timespec64 *t)
+{
+	*mt = cpu_to_le64(t->tv_sec * NSEC_PER_SEC + t->tv_nsec);
+}
+
+/* CAREFUL: Needs an sfence eventually, after this call */
+static inline
+void zus_inode_cmtime_now(struct inode *inode, struct zus_inode *zi)
+{
+	inode->i_mtime = inode->i_ctime = current_time(inode);
+	timespec_to_mt(&zi->i_ctime, &inode->i_ctime);
+	zi->i_mtime = zi->i_ctime;
+}
+
+static inline
+void zus_inode_ctime_now(struct inode *inode, struct zus_inode *zi)
+{
+	inode->i_ctime = current_time(inode);
+	timespec_to_mt(&zi->i_ctime, &inode->i_ctime);
+}
+
+enum big_alloc_type { ba_stack, ba_kmalloc, ba_vmalloc };
+
+static inline
+void *big_alloc(uint bytes, uint local_size, void *local, gfp_t gfp,
+		enum big_alloc_type *bat)
+{
+	void *ptr;
+
+	if (bytes <= local_size) {
+		*bat = ba_stack;
+		ptr = local;
+	} else if (bytes <= PAGE_SIZE) {
+		*bat = ba_kmalloc;
+		ptr = kmalloc(bytes, gfp);
+	} else {
+		*bat = ba_vmalloc;
+		ptr = vmalloc(bytes);
+	}
+
+	return ptr;
+}
+
+static inline void big_free(void *ptr, enum big_alloc_type bat)
+{
+	switch (bat) {
+	case ba_stack:
+		break;
+	case ba_kmalloc:
+		kfree(ptr);
+		break;
+	case ba_vmalloc:
+		vfree(ptr);
+	}
 }
 
 struct zuf_dispatch_op;
