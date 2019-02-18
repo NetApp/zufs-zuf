@@ -342,6 +342,7 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 		.flags = tmpfile ? ZI_TMPFILE : 0,
 		.str.len = qstr->len,
 	};
+	struct posix_acl *acl = NULL;
 	struct inode *inode;
 	struct zus_inode *zi = NULL;
 	struct page *pages[2];
@@ -364,6 +365,10 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 	err = security_inode_init_security(inode, dir, qstr, zuf_initxattrs,
 					   NULL);
 	if (err && err != -EOPNOTSUPP)
+		goto fail;
+
+	err = zuf_acls_create_pre(dir, inode, &acl);
+	if (unlikely(err))
 		goto fail;
 
 	zuf_set_inode_flags(inode, &ioc_new_inode.zi);
@@ -405,6 +410,12 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 		    zi->i_mtime, zi->i_nlink, zi->i_mode, zi->i_xattr);
 
 	zuf_dbg_verbose("allocating inode %ld (zi=%p)\n", _zi_ino(zi), zi);
+
+	if (acl && !symname) {
+		err = zuf_acls_create_post(dir, inode, acl);
+		if (unlikely(err))
+			goto fail;
+	}
 
 	err = insert_inode_locked(inode);
 	if (unlikely(err)) {

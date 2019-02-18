@@ -335,6 +335,12 @@ enum {	ZUF_XF_SECURITY    = 1,
 	ZUF_XF_USER        = 4,
 };
 
+struct zuf_acl {
+	__le16	tag;
+	__le16	perm;
+	__le32	id;
+} __packed;
+
 enum big_alloc_type { ba_stack, ba_kmalloc, ba_vmalloc };
 
 static inline

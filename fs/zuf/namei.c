@@ -420,6 +420,8 @@ const struct inode_operations zuf_dir_inode_operations = {
 	.setattr	= zuf_setattr,
 	.getattr	= zuf_getattr,
 	.update_time	= zuf_update_time,
+	.get_acl	= zuf_get_acl,
+	.set_acl	= zuf_set_acl,
 	.listxattr	= zuf_listxattr,
 };
 
@@ -427,5 +429,7 @@ const struct inode_operations zuf_special_inode_operations = {
 	.setattr	= zuf_setattr,
 	.getattr	= zuf_getattr,
 	.update_time	= zuf_update_time,
+	.get_acl	= zuf_get_acl,
+	.set_acl	= zuf_set_acl,
 	.listxattr	= zuf_listxattr,
 };

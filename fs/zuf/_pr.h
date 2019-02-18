@@ -43,6 +43,7 @@
 #define zuf_dbg_rw(s, args ...)		zuf_chan_debug("rw   ", s, ##args)
 #define zuf_dbg_t1(s, args ...)		zuf_chan_debug("t1   ", s, ##args)
 #define zuf_dbg_xattr(s, args ...)	zuf_chan_debug("xattr", s, ##args)
+#define zuf_dbg_acl(s, args ...)	zuf_chan_debug("acl  ", s, ##args)
 #define zuf_dbg_t2(s, args ...)		zuf_chan_debug("t2dbg", s, ##args)
 #define zuf_dbg_t2_rw(s, args ...)	zuf_chan_debug("t2grw", s, ##args)
 #define zuf_dbg_core(s, args ...)	zuf_chan_debug("core ", s, ##args)

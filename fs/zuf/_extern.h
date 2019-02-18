@@ -83,6 +83,15 @@ int __zuf_setxattr(struct inode *inode, int type, const char *name,
 ssize_t zuf_listxattr(struct dentry *dentry, char *buffer, size_t size);
 extern const struct xattr_handler *zuf_xattr_handlers[];
 
+/* acl.c */
+int zuf_set_acl(struct inode *inode, struct posix_acl *acl, int type);
+struct posix_acl *zuf_get_acl(struct inode *inode, int type);
+int zuf_acls_create_pre(struct inode *dir, struct inode *inode,
+			struct posix_acl **user_acl);
+int zuf_acls_create_post(struct inode *dir, struct inode *inode,
+			 struct posix_acl *acl);
+extern const struct xattr_handler zuf_acl_access_xattr_handler;
+extern const struct xattr_handler zuf_acl_default_xattr_handler;
 
 /* super.c */
 int zuf_init_inodecache(void);

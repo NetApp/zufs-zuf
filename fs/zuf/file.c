@@ -521,5 +521,7 @@ const struct inode_operations zuf_file_inode_operations = {
 	.getattr	= zuf_getattr,
 	.update_time	= zuf_update_time,
 	.fiemap		= tozu_fiemap,
+	.get_acl	= zuf_get_acl,
+	.set_acl	= zuf_set_acl,
 	.listxattr	= zuf_listxattr,
 };
