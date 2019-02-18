@@ -76,7 +76,18 @@
  */
 #define EZUF_RETRY_DONE 540
 
+/* TODO: Someone forgot i_flags & i_version for STATX_ attrs should send a patch
+ * to add them
+ */
+#define ZUFS_STATX_FLAGS	0x20000000U
+#define ZUFS_STATX_VERSION	0x40000000U
 
+/*
+ * Maximal count of links to a file
+ */
+#define ZUFS_LINK_MAX          32000
+#define ZUFS_MAX_SYMLINK	PAGE_SIZE
+#define ZUFS_NAME_LEN		255
 #define ZUFS_READAHEAD_PAGES	8
 
 /* All device sizes offsets must align on 2M */
@@ -317,6 +328,17 @@ enum e_zufs_operation {
 	ZUFS_OP_NULL = 0,
 	ZUFS_OP_STATFS,
 
+	ZUFS_OP_NEW_INODE,
+	ZUFS_OP_FREE_INODE,
+	ZUFS_OP_EVICT_INODE,
+
+	ZUFS_OP_LOOKUP,
+	ZUFS_OP_ADD_DENTRY,
+	ZUFS_OP_REMOVE_DENTRY,
+	ZUFS_OP_RENAME,
+
+	ZUFS_OP_SETATTR,
+
 	ZUFS_OP_BREAK,		/* Kernel telling Server to exit */
 	ZUFS_OP_MAX_OPT,
 };
@@ -329,6 +351,84 @@ struct zufs_ioc_statfs {
 
 	/* OUT */
 	struct statfs64 statfs_out;
+};
+
+/* zufs_ioc_new_inode flags: */
+enum zi_flags {
+	ZI_TMPFILE = 1,		/* for new_inode */
+	ZI_LOOKUP_RACE = 1,	/* for evict */
+};
+
+struct zufs_str {
+	__u8 len;
+	char name[ZUFS_NAME_LEN];
+};
+
+/* ZUFS_OP_NEW_INODE */
+struct zufs_ioc_new_inode {
+	struct zufs_ioc_hdr hdr;
+	 /* IN */
+	struct zus_inode zi;
+	struct zus_inode_info *dir_ii; /* If mktmp this is the root */
+	struct zufs_str str;
+	__u64 flags;
+
+	 /* OUT */
+	zu_dpp_t _zi;
+	struct zus_inode_info *zus_ii;
+};
+
+/* ZUFS_OP_FREE_INODE, ZUFS_OP_EVICT_INODE */
+struct zufs_ioc_evict_inode {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 flags;
+};
+
+/* ZUFS_OP_LOOKUP */
+struct zufs_ioc_lookup {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *dir_ii;
+	struct zufs_str str;
+
+	 /* OUT */
+	zu_dpp_t _zi;
+	struct zus_inode_info *zus_ii;
+};
+
+/* ZUFS_OP_ADD_DENTRY, ZUFS_OP_REMOVE_DENTRY */
+struct zufs_ioc_dentry {
+	struct zufs_ioc_hdr hdr;
+	struct zus_inode_info *zus_ii; /* IN */
+	struct zus_inode_info *zus_dir_ii; /* IN */
+	struct zufs_str str; /* IN */
+	__u64 ino; /* OUT - only for lookup */
+};
+
+/* ZUFS_OP_RENAME */
+struct zufs_ioc_rename {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *old_dir_ii;
+	struct zus_inode_info *new_dir_ii;
+	struct zus_inode_info *old_zus_ii;
+	struct zus_inode_info *new_zus_ii;
+	struct zufs_str old_d_str;
+	struct zufs_str new_d_str;
+	__u64 time;
+	__u32 flags;
+};
+
+/* ZUFS_OP_SETATTR */
+struct zufs_ioc_attr {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 truncate_size;
+	__u32 zuf_attr;
+	__u32 pad;
 };
 
 /* Allocate a special_file that will be a dual-port communication buffer with
