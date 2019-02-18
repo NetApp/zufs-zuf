@@ -48,6 +48,10 @@ uint zuf_prepare_symname(struct zufs_ioc_new_inode *ioc_new_inode,
 
 
 /* rw.c */
+ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
+			 struct kiocb *kiocb, struct iov_iter *ii);
+ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
+			  struct kiocb *kiocb, struct iov_iter *ii);
 int zuf_trim_edge(struct inode *inode, ulong filepos, uint len);
 
 /* super.c */

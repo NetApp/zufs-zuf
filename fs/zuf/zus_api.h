@@ -337,9 +337,13 @@ enum e_zufs_operation {
 	ZUFS_OP_REMOVE_DENTRY,
 	ZUFS_OP_RENAME,
 	ZUFS_OP_READDIR,
+	ZUFS_OP_CLONE,
+	ZUFS_OP_COPY,
 
 	ZUFS_OP_GET_SYMLINK,
 	ZUFS_OP_SETATTR,
+	ZUFS_OP_FALLOCATE,
+	ZUFS_OP_LLSEEK,
 
 	ZUFS_OP_BREAK,		/* Kernel telling Server to exit */
 	ZUFS_OP_MAX_OPT,
@@ -526,6 +530,47 @@ struct zufs_ioc_attr {
 	__u64 truncate_size;
 	__u32 zuf_attr;
 	__u32 pad;
+};
+
+enum ZUFS_RANGE_FLAGS {
+	ZUFS_RF_DONTNEED		= 0x00000001,
+};
+
+/* ZUFS_OP_ISYNC, ZUFS_OP_FALLOCATE */
+struct zufs_ioc_range {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 offset, length;
+	__u32 opflags;
+	__u32 ioc_flags;
+
+	/* OUT */
+	__u64 write_unmapped;
+};
+
+/* ZUFS_OP_CLONE */
+struct zufs_ioc_clone {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *src_zus_ii;
+	struct zus_inode_info *dst_zus_ii;
+	__u64 pos_in, pos_out;
+	__u64 len;
+	__u64 len_up;
+};
+
+/* ZUFS_OP_LLSEEK */
+struct zufs_ioc_seek {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 offset_in;
+	__u32 whence;
+	__u32 pad;
+
+	/* OUT */
+	__u64 offset_out;
 };
 
 /* Allocate a special_file that will be a dual-port communication buffer with

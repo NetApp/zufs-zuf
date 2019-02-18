@@ -23,3 +23,15 @@ int zuf_trim_edge(struct inode *inode, ulong filepos, uint len)
 {
 	return -EIO;
 }
+
+ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
+			 struct kiocb *kiocb, struct iov_iter *ii)
+{
+	return -EIO;
+}
+
+ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
+			  struct kiocb *kiocb, struct iov_iter *ii)
+{
+	return -EIO;
+}
