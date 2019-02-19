@@ -13,13 +13,14 @@
 #define __MD_H__
 
 #include <linux/types.h>
-#include <linux/blkdev.h>
 
 #include "md_def.h"
 
 #ifndef __KERNEL__
 struct page;
 struct block_device;
+#else
+#	include <linux/blkdev.h>
 #endif /* ndef __KERNEL__ */
 
 struct md_t1_info {
