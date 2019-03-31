@@ -408,9 +408,8 @@ out:
 	return err;
 }
 
-static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
-				struct file *file_out, loff_t pos_out,
-				loff_t len, uint remap_flags)
+static int zuf_clone_file_range(struct file *file_in, loff_t pos_in,
+				struct file *file_out, loff_t pos_out, u64 len)
 {
 	struct inode *src_inode = file_inode(file_in);
 	struct inode *dst_inode = file_inode(file_out);
@@ -423,9 +422,6 @@ static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 	zuf_dbg_vfs(
 		"ino-in=%ld ino-out=%ld pos_in=0x%llx pos_out=0x%llx length=0x%llx\n",
 		src_inode->i_ino, dst_inode->i_ino, pos_in, pos_out, len);
-
-	if (remap_flags & ~REMAP_FILE_ADVISORY)
-		return -EINVAL;
 
 	if (pos_in >= src_size || pos_in + len > src_size)
 		return -EINVAL;
@@ -486,7 +482,7 @@ static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 	if (unlikely(err))
 		zuf_err("_clone_file_range failed => %d\n", err);
 
-	return err ? err : len;
+	return err;
 }
 
 static ssize_t zuf_copy_file_range(struct file *file_in, loff_t pos_in,
@@ -500,8 +496,7 @@ static ssize_t zuf_copy_file_range(struct file *file_in, loff_t pos_in,
 	zuf_dbg_vfs("ino-in=%ld ino-out=%ld pos_in=0x%llx pos_out=0x%llx length=0x%lx\n",
 		    src_inode->i_ino, dst_inode->i_ino, pos_in, pos_out, len);
 
-	ret = zuf_clone_file_range(file_in, pos_in, file_out, pos_out, len,
-				   REMAP_FILE_ADVISORY);
+	ret = zuf_clone_file_range(file_in, pos_in, file_out, pos_out, len);
 
 	return ret ?: len;
 }
@@ -590,7 +585,7 @@ const struct file_operations zuf_file_operations = {
 	.compat_ioctl		= zuf_compat_ioctl,
 #endif
 	.copy_file_range	= zuf_copy_file_range,
-	.remap_file_range	= zuf_clone_file_range,
+	.clone_file_range	= zuf_clone_file_range,
 };
 
 const struct inode_operations zuf_file_inode_operations = {
