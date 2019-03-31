@@ -491,13 +491,6 @@ int zuf_getattr(const struct path *path, struct kstat *stat, u32 request_mask,
 	struct dentry *dentry = path->dentry;
 	struct inode *inode = d_inode(dentry);
 
-	if (inode->i_flags & S_APPEND)
-		stat->attributes |= STATX_ATTR_APPEND;
-	if (inode->i_flags & S_IMMUTABLE)
-		stat->attributes |= STATX_ATTR_IMMUTABLE;
-
-	stat->attributes_mask |= (STATX_ATTR_APPEND |
-				  STATX_ATTR_IMMUTABLE);
 	generic_fillattr(inode, stat);
 	/* stat->blocks should be the number of 512B blocks */
 	stat->blocks = inode->i_blocks << (inode->i_sb->s_blocksize_bits - 9);
