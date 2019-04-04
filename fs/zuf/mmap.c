@@ -28,8 +28,8 @@ static int _cow_private_page(struct vm_area_struct *vma, struct vm_fault *vmf)
 	err = zuf_rw_read_page(sbi, inode, vmf->cow_page,
 			       md_p2o(vmf->pgoff));
 	if (unlikely(err && err != -EINTR)) {
-		zuf_err("[%ld] read_page failed bn=0x%lx address=0x%lx => %d\n",
-			inode->i_ino, vmf->pgoff, vmf->address, err);
+		zuf_err("[%ld] read_page failed bn=0x%lx address=0x%p => %d\n",
+			inode->i_ino, vmf->pgoff, vmf->virtual_address, err);
 		/* FIXME: Probably return VM_FAULT_SIGBUS */
 	}
 
@@ -61,7 +61,7 @@ static int zuf_write_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	struct zus_inode *zi = zii->zi;
 	struct zufs_ioc_IO get_block = {};
 	int fault = VM_FAULT_SIGBUS;
-	ulong addr = vmf->address;
+	ulong addr = (ulong)vmf->virtual_address;
 	ulong pmem_bn;
 	pgoff_t size;
 	pfn_t pfnt;
@@ -113,6 +113,10 @@ static int zuf_write_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (get_block.gp_block.ret_flags & ZUFS_GBF_NEW) {
 		/* newly created block */
 		inode->i_blocks = le64_to_cpu(zii->zi->i_blocks);
+	} else if (vmf->flags & FAULT_FLAG_MKWRITE) {
+		/* block didn't change - just tell mm to flip the write bit */
+		fault = VM_FAULT_WRITE;
+		goto skip_insert;
 	}
 	unmap_mapping_range(inode->i_mapping, vmf->pgoff << PAGE_SHIFT,
 				    PAGE_SIZE, 0);
@@ -130,6 +134,7 @@ static int zuf_write_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	zuf_dbg_mmap("[%ld] vm_insert_mixed 0x%lx prot=0x%lx => %d\n",
 		    _zi_ino(zi), pfn, vma->vm_page_prot.pgprot, err);
 
+skip_insert:
 	zuf_sync_inc(inode);
 put:
 	_zuf_get_put_block(sbi, zii, ZUFS_OP_PUT_BLOCK, WRITE, vmf->pgoff,
@@ -140,9 +145,9 @@ out:
 	return fault;
 }
 
-static int zuf_pfn_mkwrite(struct vm_fault *vmf)
+static int zuf_pfn_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	return zuf_write_fault(vmf->vma, vmf);
+	return zuf_write_fault(vma, vmf);
 }
 
 static int zuf_read_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
@@ -153,7 +158,7 @@ static int zuf_read_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	struct zus_inode *zi = zii->zi;
 	struct zufs_ioc_IO get_block = {};
 	int fault = VM_FAULT_SIGBUS;
-	ulong addr = vmf->address;
+	ulong addr = (ulong)vmf->virtual_address;
 	ulong pmem_bn;
 	pgoff_t size;
 	pfn_t pfnt;
@@ -194,7 +199,7 @@ static int zuf_read_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	pmem_bn = _gb_bn(&get_block);
 	if (pmem_bn == 0) {
 		/* Hole in file */
-		pfnt = pfn_to_pfn_t(my_zero_pfn(vmf->address));
+		pfnt = pfn_to_pfn_t(my_zero_pfn((ulong)vmf->virtual_address));
 	} else {
 		/* We have a real page */
 		pfnt = phys_to_pfn_t(PFN_PHYS(md_pfn(sbi->md, pmem_bn)),
@@ -220,14 +225,14 @@ out:
 	return fault;
 }
 
-static int zuf_fault(struct vm_fault *vmf)
+static int zuf_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	bool write_fault = (0 != (vmf->flags & FAULT_FLAG_WRITE));
 
 	if (write_fault)
-		return zuf_write_fault(vmf->vma, vmf);
+		return zuf_write_fault(vma, vmf);
 	else
-		return zuf_read_fault(vmf->vma, vmf);
+		return zuf_read_fault(vma, vmf);
 }
 
 static void zuf_mmap_open(struct vm_area_struct *vma)
@@ -281,7 +286,10 @@ int zuf_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 	file_accessed(file);
 
+	vma->vm_flags2 |= VM_PFN_MKWRITE;
 	vma->vm_ops = &zuf_vm_ops;
+
+	zuf_backport_fix_vma(vma);
 
 	atomic_inc(&zii->vma_count);
 

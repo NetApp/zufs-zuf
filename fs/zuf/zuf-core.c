@@ -528,7 +528,7 @@ static int _map_pages(struct zufc_thread *zt, struct page **pages, uint nump,
 			flt = vmf_insert_mixed_mkwrite(zt->vma, zt_addr, pfnt);
 		err = zuf_flt_to_err(flt);
 		if (unlikely(err)) {
-			zuf_err("zuf: remap_pfn_range => %d p=0x%x start=0x%lx\n",
+			zuf_err("zuf: vm_insert_mixed => %d p=0x%x start=0x%lx\n",
 				 err, p, zt->vma->vm_start);
 			return err;
 		}
@@ -538,13 +538,17 @@ static int _map_pages(struct zufc_thread *zt, struct page **pages, uint nump,
 
 static void _unmap_pages(struct zufc_thread *zt, struct page **pages, uint nump)
 {
+	int err;
+
 	if (!(zt->vma && zt->zdo && pages && nump))
 		return;
 
 	zt->zdo->pages = NULL;
 	zt->zdo->nump = 0;
 
-	zap_vma_ptes(zt->vma, zt->vma->vm_start, nump * PAGE_SIZE);
+	err = zap_vma_ptes(zt->vma, zt->vma->vm_start, nump * PAGE_SIZE);
+	if (unlikely(err))
+		zuf_err("!!! zap_vma_ptes failed => %d\n", err);
 }
 
 static void _fill_buff(ulong *buff, uint size)
@@ -1150,7 +1154,7 @@ int zufc_release(struct inode *inode, struct file *file)
 
 /* ~~~~  mmap area of app buffers into server ~~~~ */
 
-static int zuf_zt_fault(struct vm_fault *vmf)
+static int zuf_zt_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	zuf_err("should not fault pgoff=0x%lx\n", vmf->pgoff);
 	return VM_FAULT_SIGBUS;
@@ -1166,6 +1170,8 @@ static int _zufc_zt_mmap(struct file *file, struct vm_area_struct *vma,
 	/* VM_PFNMAP for zap_vma_ptes() Careful! */
 	vma->vm_flags |= VM_PFNMAP;
 	vma->vm_ops = &zuf_vm_ops;
+
+	zuf_backport_fix_vma(vma);
 
 	zt->vma = vma;
 
@@ -1206,9 +1212,8 @@ static int _opt_buff_mmap(struct vm_area_struct *vma, void *opt_buff,
 	return 0;
 }
 
-static int zuf_obuff_fault(struct vm_fault *vmf)
+static int zuf_obuff_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	struct vm_area_struct *vma = vmf->vma;
 	struct zufc_thread *zt = _zt_from_f_private(vma->vm_file);
 	long offset = (vmf->pgoff << PAGE_SHIFT) - ZUS_API_MAP_MAX_SIZE;
 	int err;
@@ -1250,6 +1255,8 @@ static int _zufc_obuff_mmap(struct file *file, struct vm_area_struct *vma,
 	vma->vm_flags |= VM_PFNMAP;
 	vma->vm_ops = &zuf_obuff_ops;
 
+	zuf_backport_fix_vma(vma);
+
 	zt->opt_buff_vma = vma;
 
 	zuf_dbg_core(
@@ -1288,9 +1295,8 @@ static int zufc_zt_mmap(struct file *file, struct vm_area_struct *vma)
 
 /* ~~~~ Implementation of the ZU_IOC_ALLOC_BUFFER mmap facility ~~~~ */
 
-static int zuf_ebuff_fault(struct vm_fault *vmf)
+static int zuf_ebuff_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	struct vm_area_struct *vma = vmf->vma;
 	struct zu_exec_buff *ebuff = _ebuff_from_file(vma->vm_file);
 	long offset = (vmf->pgoff << PAGE_SHIFT);
 	int err;
@@ -1330,6 +1336,8 @@ static int zufc_ebuff_mmap(struct file *file, struct vm_area_struct *vma)
 
 	vma->vm_flags |= VM_PFNMAP;
 	vma->vm_ops = &zuf_ebuff_ops;
+
+	zuf_backport_fix_vma(vma);
 
 	ebuff->vma = vma;
 

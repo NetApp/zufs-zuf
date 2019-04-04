@@ -38,6 +38,13 @@ static inline int _compat_generic_write_checks(struct kiocb *kiocb,
 				    &ii->count, 0);
 }
 
+static inline
+void zuf_backport_fix_vma(struct vm_area_struct *vma)
+{
+	/* vm_insert_mixed in RHEL 7.5 requires this */
+	vma->vm_flags |= VM_MIXEDMAP;
+}
+
 typedef int vm_fault_t;
 
 static inline
