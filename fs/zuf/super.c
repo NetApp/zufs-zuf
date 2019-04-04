@@ -867,8 +867,7 @@ int __init zuf_init_inodecache(void)
 					       sizeof(struct zuf_inode_info),
 					       0,
 					       (SLAB_RECLAIM_ACCOUNT |
-						SLAB_MEM_SPREAD |
-						SLAB_TYPESAFE_BY_RCU),
+						SLAB_MEM_SPREAD /*| SLAB_TYPESAFE_BY_RCU*/),
 					       _init_once);
 	if (zuf_inode_cachep == NULL)
 		return -ENOMEM;
