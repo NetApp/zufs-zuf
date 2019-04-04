@@ -521,7 +521,12 @@ int zuf_setattr(struct dentry *dentry, struct iattr *attr)
 	if (!zi)
 		return -EACCES;
 
+#ifdef BACKPORT_GETATTR
+	err = inode_change_ok(inode, attr);
+#else
 	err = setattr_prepare(dentry, attr);
+#endif /* BACKPORT_GETATTR */
+
 	if (unlikely(err))
 		return err;
 

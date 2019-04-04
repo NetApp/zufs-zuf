@@ -24,6 +24,7 @@
 #include <linux/exportfs.h>
 #include <linux/page_ref.h>
 #include <linux/mm.h>
+#include <linux/aio.h>
 
 #include "zus_api.h"
 

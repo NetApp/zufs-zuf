@@ -509,6 +509,25 @@ static int zuf_file_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+static int _remove_privs_locked(struct inode *inode, struct file *file)
+{
+	int ret;
+
+	if (IS_NOSEC(inode))
+		return 0;
+
+	ret = file_needs_remove_privs(file);
+	if (ret < 0)
+		return ret;
+
+	if (ret) {
+		inode_lock(inode);
+		ret = file_remove_privs(file);
+		inode_unlock(inode);
+	}
+	return ret;
+}
+
 static ssize_t zuf_read_iter(struct kiocb *kiocb, struct iov_iter *ii)
 {
 	struct inode *inode = file_inode(kiocb->ki_filp);
@@ -536,7 +555,8 @@ static ssize_t zuf_write_iter(struct kiocb *kiocb, struct iov_iter *ii)
 	struct zuf_inode_info *zii = ZUII(inode);
 	ssize_t ret;
 
-	ret = generic_write_checks(kiocb, ii);
+	ret = generic_write_checks(kiocb->ki_filp, &kiocb->ki_pos, &ii->count,
+				   0);
 	if (unlikely(ret < 0)) {
 		zuf_dbg_vfs("[%ld] generic_write_checks => 0x%lx\n",
 			    inode->i_ino, ret);
@@ -545,7 +565,7 @@ static ssize_t zuf_write_iter(struct kiocb *kiocb, struct iov_iter *ii)
 
 	zuf_r_lock(zii);
 
-	ret = file_remove_privs(kiocb->ki_filp);
+	ret = _remove_privs_locked(inode, kiocb->ki_filp);
 	if (unlikely(ret < 0))
 		goto out;
 
@@ -567,10 +587,72 @@ out:
 	return ret;
 }
 
+#ifdef BACKPORT_NO_RW_ITER
+
+/* Stupid Kernel version in the case of #written==0 does way too much
+ * crap. I can't allow it sorry I wish I did not care
+ */
+static inline
+int B__iov_iter_init(struct iov_iter *i, const struct iovec *iov,
+		      ulong nr_segs, int rw)
+{
+	int ret;
+
+	/* yes generic_segment_checks verifies opposite of the directions */
+	ret = generic_segment_checks(iov, &nr_segs, &i->count,
+				     rw == READ ? VERIFY_WRITE: VERIFY_READ);
+
+	if (ret < 0)
+		return ret;
+
+	i->iov = iov;
+	i->nr_segs = nr_segs;
+	i->iov_offset = 0;
+	return ret;
+}
+
+static
+ssize_t zuf_rw_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
+			       ulong nr_segs, loff_t pos)
+{
+	struct iov_iter ii = {};
+	int ret;
+
+	ret = B__iov_iter_init(&ii, iov, nr_segs, WRITE);
+	if (unlikely(ret))
+		return ret;
+	if (ii.count == 0)
+		return 0;
+
+	return zuf_write_iter(iocb, &ii);
+}
+
+static
+ssize_t zuf_rw_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
+			      ulong nr_segs, loff_t pos)
+{
+	struct iov_iter ii = {};
+	int ret;
+
+	ret = B__iov_iter_init(&ii, iov, nr_segs, READ);
+	if (unlikely(ret < 0))
+		return ret;
+
+	return zuf_read_iter(iocb, &ii);
+}
+#endif
+
 const struct file_operations zuf_file_operations = {
 	.llseek			= zuf_llseek,
+#ifndef BACKPORT_NO_RW_ITER
 	.read_iter		= zuf_read_iter,
 	.write_iter		= zuf_write_iter,
+#else
+	.aio_read		= zuf_rw_file_aio_read,
+	.aio_write		= zuf_rw_file_aio_write,
+	.write			= do_sync_write,
+	.read			= do_sync_read,
+#endif
 	.mmap			= zuf_file_mmap,
 	.open			= generic_file_open,
 	.fsync			= zuf_fsync,
