@@ -37,26 +37,43 @@ define run-fpm =
 	     --after-install $(MDIR)/post_install.sh .
 endef
 
-rpm: build
+deb_kprefix = linux-headers-
+rpm_kprefix =
+
+rpm deb: build
 	$(eval TMPDIR := $(shell mktemp -d))
-	$(MAKE) -C $(KDIR) M=$(MDIR) DEPMOD=true MODLIB=$(TMPDIR)$(LIBDIR) modules_install
+	#$(MAKE) -C $(KDIR) M=$(MDIR) DEPMOD=true MODLIB=$(TMPDIR)$(LIBDIR) modules_install
+	@mkdir -vp $(TMPDIR)$(LIBDIR)/extra
+	@kver=$(subst $($(@)_kprefix),,$(notdir $(KDIR))) ; echo $${kver} ; \
+	     cp -v $(MDIR)/zuf.ko $(TMPDIR)$(LIBDIR)/extra/zuf.$${kver}.ko
 	$(eval GIT_HASH := $(shell git rev-parse HEAD))
-	$(call run-fpm, rpm)
+	$(call run-fpm, $@)
 	rm -rf $(TMPDIR)
 
-ALL_KERNS_DIR ?= /usr/src/kernels
-ALL_KERNS_VERS ?= $(shell ls $(ALL_KERNS_DIR))
+ALL_KERNS_DIR ?= /usr/src
 
-multi-rpm:
+multi-rpm multi-deb:
 	$(eval TMPDIR := $(shell mktemp -d))
 	@mkdir -vp $(TMPDIR)$(LIBDIR)/extra
-	@for kver in $(ALL_KERNS_VERS) ; do \
-		$(MAKE) -C $(ALL_KERNS_DIR)/$$kver M=$(MDIR) $(PARAMS) clean ; \
-		$(MAKE) -C $(ALL_KERNS_DIR)/$$kver M=$(MDIR) $(PARAMS) modules ; \
-		cp -v $(MDIR)/zuf.ko $(TMPDIR)$(LIBDIR)/extra/zuf.$$kver.ko ; \
+	@if [[ "$(@)" == "multi-deb" ]] ; then \
+		pre_s="$(ALL_KERNS_DIR)/$(deb_kprefix)" ; \
+		kern_vers=$$(echo $(ALL_KERNS_DIR)/*-generic) ; \
+	elif [[ "$(@)" == "multi-rpm" ]] ; then \
+		pre_s="$(ALL_KERNS_DIR)/kernels/" ; \
+		kern_vers=$$(echo $(ALL_KERNS_DIR)/kernels/*) ; \
+	else \
+		echo "Unknown target" ; \
+		exit 1 ; \
+	fi ; \
+	for k in $$kern_vers ; do \
+		[[ ! -f $$k/Module.symvers ]] && continue ; \
+		$(MAKE) -C $$k M=$(MDIR) $(PARAMS) clean ; \
+		$(MAKE) -C $$k M=$(MDIR) $(PARAMS) modules ; \
+		kver=$$(echo $$k | sed -e "s|$${pre_s}||") ; \
+		cp -v $(MDIR)/zuf.ko $(TMPDIR)$(LIBDIR)/extra/zuf.$${kver}.ko ; \
 	done
 	$(eval GIT_HASH := $(shell git rev-parse HEAD))
-	$(call run-fpm, rpm)
+	$(call run-fpm, $(subst multi-,,$@))
 	rm -rf $(TMPDIR)
 
-.PHONY: clean build install rpm multi-rpm
+.PHONY: clean build install rpm multi-rpm deb multi-deb
