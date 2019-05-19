@@ -423,9 +423,6 @@ static int zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 		"ino-in=%ld ino-out=%ld pos_in=0x%llx pos_out=0x%llx length=0x%llx\n",
 		src_inode->i_ino, dst_inode->i_ino, pos_in, pos_out, len);
 
-	if (pos_in >= src_size || pos_in + len > src_size)
-		return -EINVAL;
-
 	if (src_inode == dst_inode) {
 		if (pos_in == pos_out) {
 			zuf_dbg_err("[%ld] Clone nothing!!\n",
