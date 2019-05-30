@@ -286,6 +286,7 @@ int zuf_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 	file_accessed(file);
 
+	vma->vm_flags |= VM_MIXEDMAP;
 	vma->vm_flags2 |= VM_PFN_MKWRITE;
 	vma->vm_ops = &zuf_vm_ops;
 
