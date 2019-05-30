@@ -113,7 +113,8 @@ static int zuf_write_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (get_block.gp_block.ret_flags & ZUFS_GBF_NEW) {
 		/* newly created block */
 		inode->i_blocks = le64_to_cpu(zii->zi->i_blocks);
-	} else if (vmf->flags & FAULT_FLAG_MKWRITE) {
+	} else if (vmf->flags & FAULT_FLAG_MKWRITE &&
+		   pte_pfn(vmf->orig_pte) == md_pfn(sbi->md, pmem_bn)) {
 		/* block didn't change - just tell mm to flip the write bit */
 		fault = VM_FAULT_WRITE;
 		goto skip_insert;
