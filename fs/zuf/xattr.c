@@ -196,11 +196,11 @@ ssize_t zuf_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	struct zuf_inode_info *zii = ZUII(inode);
 	ssize_t ret;
 
-	zuf_smr_lock(zii);
+	zuf_xar_lock(zii);
 
 	ret = __zuf_listxattr(inode, buffer, size);
 
-	zuf_smr_unlock(zii);
+	zuf_xar_unlock(zii);
 
 	return ret;
 }
@@ -221,11 +221,11 @@ int zuf_xattr_handler_get(const struct xattr_handler *handler,
 
 	zuf_dbg_xattr("[%ld] name=%s\n", inode->i_ino, name);
 
-	zuf_smr_lock(zii);
+	zuf_xar_lock(zii);
 
 	ret = __zuf_getxattr(inode, handler->flags, name, value, size);
 
-	zuf_smr_unlock(zii);
+	zuf_xar_unlock(zii);
 
 	return ret;
 }
@@ -242,11 +242,11 @@ int zuf_xattr_handler_set(const struct xattr_handler *handler,
 	zuf_dbg_xattr("[%ld] name=%s size=0x%lx flags=0x%x\n",
 			inode->i_ino, name, size, flags);
 
-	zuf_smw_lock(zii);
+	zuf_xaw_lock(zii);
 
 	err = __zuf_setxattr(inode, handler->flags, name, value, size, flags);
 
-	zuf_smw_unlock(zii);
+	zuf_xaw_unlock(zii);
 
 	return err;
 }
