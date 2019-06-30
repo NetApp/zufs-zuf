@@ -65,6 +65,17 @@ static long zuf_fallocate(struct file *file, int mode, loff_t offset,
 		ulong off1 = offset & (sb->s_blocksize - 1);
 		ulong off2 = (offset + len) & (sb->s_blocksize - 1);
 
+		if (mode & FALLOC_FL_PUNCH_HOLE) {
+			if (i_size_read(inode) <= offset)
+				goto out;
+
+			if (i_size_read(inode) < offset + len) {
+				len = i_size_read(inode) - offset;
+				off2 = i_size_read(inode) &
+							(sb->s_blocksize - 1);
+			}
+		}
+
 		if (md_o2p(offset) == md_o2p(offset + len)) {
 			/* Same block. Just nullify the range and goto out */
 			err = zuf_trim_edge(inode, offset, off2 - off1);
@@ -75,7 +86,7 @@ static long zuf_fallocate(struct file *file, int mode, loff_t offset,
 
 			err = zuf_trim_edge(inode, offset, l);
 			if (unlikely(err))
-				goto out;
+				goto out_update;
 			if (mode & FALLOC_FL_ZERO_RANGE) {
 				ioc_range.offset += l;
 				ioc_range.length -= l;
@@ -84,7 +95,7 @@ static long zuf_fallocate(struct file *file, int mode, loff_t offset,
 		if (off2) {
 			err = zuf_trim_edge(inode, (offset + len) - off2, off2);
 			if (unlikely(err))
-				goto out;
+				goto out_update;
 			if (mode & FALLOC_FL_ZERO_RANGE)
 				ioc_range.length -= off2;
 		}
@@ -245,26 +256,84 @@ static int zuf_flush(struct file *file, fl_owner_t id)
 	return 0;
 }
 
-static int tozu_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
-		       u64 offset, u64 len)
+static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+		      u64 offset, u64 len)
 {
-	int err = -EOPNOTSUPP;
-	ulong start_index = md_o2p(offset);
-	ulong end_index = md_o2p_up(offset + len);
+	struct super_block *sb = inode->i_sb;
 	struct zuf_inode_info *zii = ZUII(inode);
+	struct zufs_ioc_fiemap ioc_fiemap = {
+		.hdr.operation = ZUFS_OP_FIEMAP,
+		.hdr.in_len = sizeof(ioc_fiemap),
+		.hdr.out_len = sizeof(ioc_fiemap),
+		.zus_ii = zii->zus_ii,
+		.start = offset,
+		.length = len,
+		.flags = fieinfo->fi_flags,
+	};
+	struct page *pages[ZUS_API_MAP_MAX_PAGES];
+	uint nump = 0, extents_max = 0;
+	int i, err;
 
-	zuf_dbg_vfs(
-		"[%ld] offset=0x%llx len=0x%llx i-start=0x%lx i-end=0x%lx\n",
-		inode->i_ino, offset, len, start_index, end_index);
+	zuf_dbg_vfs("[%ld] offset=0x%llx len=0x%llx "
+		"extents_max=%u flags=0x%x\n", inode->i_ino, offset, len,
+		fieinfo->fi_extents_max, fieinfo->fi_flags);
 
-	if (fiemap_check_flags(fieinfo, FIEMAP_FLAG_SYNC))
-		return -EBADR;
+	/* TODO: Have support for FIEMAP_FLAG_XATTR */
+	err = fiemap_check_flags(fieinfo, FIEMAP_FLAG_SYNC);
+	if (unlikely(err))
+		return err;
+
+	if (likely(fieinfo->fi_extents_max)) {
+		ulong start = (ulong)fieinfo->fi_extents_start;
+		ulong len = fieinfo->fi_extents_max *
+						sizeof(struct fiemap_extent);
+		ulong offset = start & (PAGE_SIZE - 1);
+		ulong end_offset = (offset + len) & (PAGE_SIZE - 1);
+		ulong __len;
+		uint nump_r;
+
+		nump = md_o2p_up(offset + len);
+		if (ARRAY_SIZE(pages) < nump) {
+			nump = ARRAY_SIZE(pages);
+			end_offset = 0;
+		}
+
+		nump_r = get_user_pages_fast(start, nump, WRITE, pages);
+		if (unlikely(nump != nump_r))
+			return -EFAULT;
+
+		__len = nump * PAGE_SIZE - offset;
+		if (end_offset)
+			__len -= (PAGE_SIZE - end_offset);
+
+		extents_max = __len / sizeof(struct fiemap_extent);
+
+		ioc_fiemap.hdr.len = extents_max * sizeof(struct fiemap_extent);
+		ioc_fiemap.hdr.offset = offset;
+	}
+	ioc_fiemap.extents_max = extents_max;
 
 	zuf_r_lock(zii);
 
-	/* TODO: ZUS fiemap (&msi)*/
+	err = zufc_dispatch(ZUF_ROOT(SBI(sb)), &ioc_fiemap.hdr, pages, nump);
+	if (unlikely(err)) {
+		zuf_dbg_err("zufs_dispatch failed => %d\n", err);
+		goto out;
+	}
 
+	fieinfo->fi_extents_mapped = ioc_fiemap.extents_mapped;
+	if (unlikely(extents_max && (extents_max < ioc_fiemap.extents_mapped))) {
+		zuf_err("extents_max=%d extents_mapped=%d\n", extents_max,
+			ioc_fiemap.extents_mapped);
+		err = -EINVAL;
+	}
+
+out:
 	zuf_r_unlock(zii);
+
+	for (i = 0; i < nump; ++i)
+		put_page(pages[i]);
+
 	return err;
 }
 
@@ -291,6 +360,7 @@ static void _unlock_two_ziis(struct zuf_inode_info *zii1,
 }
 
 static int _clone_file_range(struct inode *src_inode, loff_t pos_in,
+			     struct file *file_out,
 			     struct inode *dst_inode, loff_t pos_out,
 			     u64 len, u64 len_up, int operation)
 {
@@ -312,6 +382,10 @@ static int _clone_file_range(struct inode *src_inode, loff_t pos_in,
 	int err;
 
 	_lock_two_ziis(src_zii, dst_zii);
+
+	err = file_remove_privs(file_out);
+	if (unlikely(err))
+		goto out;
 
 	/* NOTE: len==0 means to-end-of-file which is what we want */
 	unmap_mapping_range(src_inode->i_mapping, pos_in,  len, 0);
@@ -351,6 +425,9 @@ static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 		src_inode->i_ino, dst_inode->i_ino, pos_in, pos_out, len);
 
 	if (remap_flags & ~REMAP_FILE_ADVISORY)
+		return -EINVAL;
+
+	if (pos_in >= src_size || pos_in + len > src_size)
 		return -EINVAL;
 
 	if (src_inode == dst_inode) {
@@ -404,8 +481,8 @@ static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 		len_up = md_p2o(md_o2p_up(len));
 	}
 
-	err = _clone_file_range(src_inode, pos_in, dst_inode, pos_out, len,
-				len_up, ZUFS_OP_CLONE);
+	err = _clone_file_range(src_inode, pos_in, file_out, dst_inode, pos_out,
+				len, len_up, ZUFS_OP_CLONE);
 	if (unlikely(err))
 		zuf_err("_clone_file_range failed => %d\n", err);
 
@@ -520,7 +597,7 @@ const struct inode_operations zuf_file_inode_operations = {
 	.setattr	= zuf_setattr,
 	.getattr	= zuf_getattr,
 	.update_time	= zuf_update_time,
-	.fiemap		= tozu_fiemap,
+	.fiemap		= zuf_fiemap,
 	.get_acl	= zuf_get_acl,
 	.set_acl	= zuf_set_acl,
 	.listxattr	= zuf_listxattr,

@@ -286,12 +286,14 @@ void zuf_evict_inode(struct inode *inode)
 			_warn_inode_dirty(inode, zii->zi);
 
 		zuf_w_lock(zii);
+		zuf_xaw_lock(zii); /* Needed? probably not but palying safe */
 
 		zuf_evict_dispatch(sb, zii->zus_ii, ZUFS_OP_FREE_INODE, 0);
 
 		inode->i_mtime = inode->i_ctime = current_time(inode);
 		inode->i_size = 0;
 
+		zuf_xaw_unlock(zii);
 		zuf_w_unlock(zii);
 	} else {
 		zuf_dbg_vfs("[%ld] inode is going down?\n", inode->i_ino);
@@ -306,12 +308,6 @@ void zuf_evict_inode(struct inode *inode)
 out:
 	zii->zus_ii = NULL;
 	zii->zi = NULL;
-
-	if (zii->zero_page) {
-		zii->zero_page->mapping = NULL;
-		__free_pages(zii->zero_page, 0);
-		zii->zero_page = NULL;
-	}
 
 	/* ZUS on evict has synced all mmap dirty pages, YES? */
 	write_mapped = atomic_read(&zii->write_mapped);
@@ -627,11 +623,13 @@ int zuf_setattr(struct dentry *dentry, struct iattr *attr)
 
 void zuf_set_inode_flags(struct inode *inode, struct zus_inode *zi)
 {
-	unsigned int flags = le32_to_cpu(zi->i_flags);
+	unsigned int flags = le16_to_cpu(zi->i_flags) & ~ZUFS_S_IMMUTABLE;
 
 	inode->i_flags &=
 		~(S_SYNC | S_APPEND | S_IMMUTABLE | S_NOATIME | S_DIRSYNC);
 	inode->i_flags |= flags;
+	if (zi->i_flags & ZUFS_S_IMMUTABLE)
+		inode->i_flags |= S_IMMUTABLE | S_NOATIME;
 	if (!zi->i_xattr)
 		inode_has_no_xattr(inode);
 }

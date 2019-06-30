@@ -510,6 +510,15 @@ out:
 	return 0;
 }
 
+static int iom_wbinv(__u64 **cur_e)
+{
+	wbinvd();
+
+	++*cur_e;
+
+	return 0;
+}
+
 struct _iom_exec_info {
 	struct super_block *sb;
 	struct inode *inode;
@@ -530,17 +539,20 @@ static int _iom_execute_inline(struct _iom_exec_info *iei)
 	uint uns = 0;
 	uint wrmem = 0;
 	uint rdmem = 0;
+	uint wbinv = 0;
 #	define	WRS()	(++wrs)
 #	define	RDS()	(++rds)
 #	define	UNS()	(++uns)
 #	define	WRMEM()	(++wrmem)
 #	define	RDMEM()	(++rdmem)
+#	define	WBINV()	(++wbinv)
 #else
 #	define	WRS()
 #	define	RDS()
 #	define	UNS()
 #	define	WRMEM()
 #	define	RDMEM()
+#	define	WBINV()
 #endif /* !def CONFIG_ZUF_DEBUG */
 
 	cur_e =  iei->iom_e;
@@ -584,6 +596,11 @@ static int _iom_execute_inline(struct _iom_exec_info *iei)
 		case IOM_UNMAP:
 			err = iom_unmap(iei->sb, iei->inode, &cur_e);
 			UNS();
+			break;
+
+		case IOM_WBINV:
+			err = iom_wbinv(&cur_e);
+			WBINV();
 			break;
 
 		default:
