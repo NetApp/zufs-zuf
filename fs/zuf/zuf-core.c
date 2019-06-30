@@ -71,7 +71,7 @@ int zufc_zts_init(struct zuf_root_info *zri)
 	if (unlikely(!zri->_ztp))
 		return -ENOMEM;
 
-	zri->_ztp->_max_zts = num_online_cpus();
+	zri->_ztp->_max_zts = num_possible_cpus();
 	zri->_ztp->_max_channels = INITIAL_ZT_CHANNELS;
 
 	for (c = 0; c < INITIAL_ZT_CHANNELS; ++c) {
@@ -167,7 +167,7 @@ int __zufc_dispatch_mount(struct zuf_root_info *zri,
 	}
 
 	zri->mount.zim = zim;
-	relay_fss_wakeup_app_wait(&zri->mount.relay, &zri->mount.lock);
+	relay_fss_wakeup_app_wait_spin(&zri->mount.relay, &zri->mount.lock);
 
 	return zim->hdr.err;
 }
@@ -273,18 +273,101 @@ static void zufc_mounter_release(struct file *file)
 	}
 }
 
+static int _zu_private_mounter(struct file *file, void *parg)
+{
+	struct super_block *sb = file->f_inode->i_sb;
+	struct zufs_ioc_mount_private *zip = NULL;
+	struct zuf_private_mount_info *zpmi;
+	struct zuf_root_info *zri = ZRI(sb);
+	struct zufs_ioc_hdr hdr;
+	ulong cp_ret;
+	int err = 0;
+
+	if (unlikely(file->private_data)) {
+		zuf_err("One mount per runner please..\n");
+		return -EINVAL;
+	}
+
+	zpmi = kzalloc(sizeof(*zpmi), GFP_KERNEL);
+	if (unlikely(!zpmi)) {
+		zuf_err("alloc failed\n");
+		return -ENOMEM;
+	}
+
+	zpmi->zsf.type = zlfs_e_private_mount;
+	zpmi->zsf.file = file;
+
+	cp_ret = copy_from_user(&hdr, parg, sizeof(hdr));
+	if (unlikely(cp_ret)) {
+		zuf_err("copy_from_user(hdr) => %ld\n", cp_ret);
+		err = -EFAULT;
+		goto fail;
+	}
+
+	zip = kmalloc(hdr.in_len, GFP_KERNEL);
+	if (unlikely(!zip)) {
+		zuf_err("alloc failed\n");
+		err = -ENOMEM;
+		goto fail;
+	}
+
+	cp_ret = copy_from_user(zip, parg, hdr.in_len);
+	if (unlikely(cp_ret)) {
+		zuf_err("copy_from_user => %ld\n", cp_ret);
+		err = -EFAULT;
+		goto fail;
+	}
+
+	err = zuf_private_mount(zri, &zip->rfi, &zip->zmi, &zpmi->sb);
+	if (unlikely(err))
+		goto fail;
+
+	cp_ret = copy_to_user(parg, zip, hdr.in_len);
+	if (unlikely(cp_ret)) {
+		zuf_err("copy_to_user =>%ld\n", cp_ret);
+		err = -EFAULT;
+		goto fail;
+	}
+
+	file->private_data = &zpmi->zsf;
+
+out:
+	kfree(zip);
+	return err;
+
+fail:
+	kfree(zpmi);
+	goto out;
+}
+
+static int _zu_private_mounter_release(struct file *file)
+{
+	struct zuf_root_info *zri = ZRI(file->f_inode->i_sb);
+	struct zuf_special_file *zsf = file->private_data;
+	struct zuf_private_mount_info *zpmi;
+	int err;
+
+	zpmi = container_of(zsf, struct zuf_private_mount_info, zsf);
+
+	err = zuf_private_umount(zri, zpmi->sb);
+
+	kfree(zpmi);
+
+	return err;
+}
+
 /* ~~~~ ZU_IOC_NUMA_MAP ~~~~ */
 static int _zu_numa_map(struct file *file, void *parg)
 {
 	struct zufs_ioc_numa_map *numa_map;
-	int n_nodes = num_online_nodes();
-	int n_cpus = num_online_cpus();
+	int n_nodes = num_possible_nodes();
 	uint *nodes_cpu_count;
 	uint max_cpu_per_node = 0;
 	uint alloc_size;
 	int cpu, i, err;
 
-	alloc_size = sizeof(*numa_map) + n_cpus; /* char per cpu */
+	alloc_size = sizeof(*numa_map) +
+			(n_nodes * sizeof(numa_map->cpu_set_per_node[0]));
 
 	if ((n_nodes > 255) || (alloc_size > PAGE_SIZE)) {
 		zuf_warn("!!!unexpected big machine with %d nodes alloc_size=0x%x\n",
@@ -305,14 +388,16 @@ static int _zu_numa_map(struct file *file, void *parg)
 	numa_map->possible_nodes	= num_possible_nodes();
 	numa_map->possible_cpus		= num_possible_cpus();
 
-	numa_map->online_nodes		= n_nodes;
-	numa_map->online_cpus		= n_cpus;
+	numa_map->online_nodes		= num_online_nodes();
+	numa_map->online_cpus		= num_online_cpus();
+
+	for_each_online_cpu(cpu)
+		set_bit(cpu, numa_map->cpu_set_per_node[cpu_to_node(cpu)].bits);
 
 	for_each_cpu(cpu, cpu_online_mask) {
 		uint ctn  = cpu_to_node(cpu);
 		uint ncc = ++nodes_cpu_count[ctn];
 
-		numa_map->cpu_to_node[cpu] = ctn;
 		max_cpu_per_node = max(max_cpu_per_node, ncc);
 	}
 
@@ -330,7 +415,7 @@ static int _zu_numa_map(struct file *file, void *parg)
 	zuf_dbg_verbose(
 		"possible_nodes=%d possible_cpus=%d online_nodes=%d online_cpus=%d\n",
 		numa_map->possible_nodes, numa_map->possible_cpus,
-		n_nodes, n_cpus);
+		numa_map->online_nodes, numa_map->online_cpus);
 
 	err = copy_to_user(parg, numa_map, alloc_size);
 	kfree(numa_map);
@@ -373,7 +458,7 @@ static int _zu_grab_pmem(struct file *file, void *parg)
 	struct zuf_root_info *zri = ZRI(file->f_inode->i_sb);
 	struct zufs_ioc_pmem __user *arg_pmem = parg;
 	struct zufs_ioc_pmem *zi_pmem = kzalloc(sizeof(*zi_pmem), GFP_KERNEL);
-	struct zuf_pmem *pmem_md;
+	struct zuf_pmem *pmem_md = NULL;
 	size_t pmem_size;
 	int err;
 
@@ -387,7 +472,7 @@ static int _zu_grab_pmem(struct file *file, void *parg)
 	}
 
 	err = zufr_find_pmem(zri, zi_pmem->pmem_kern_id, &pmem_md);
-	if (err) {
+	if (unlikely(err || !pmem_md)) {
 		zuf_err("!!! pmem_kern_id=%d not found\n",
 			zi_pmem->pmem_kern_id);
 		goto out;
@@ -400,6 +485,7 @@ static int _zu_grab_pmem(struct file *file, void *parg)
 	}
 
 	memcpy(&zi_pmem->mdt, md_zdt(&pmem_md->md), sizeof(zi_pmem->mdt));
+	zi_pmem->dev_index = pmem_md->md.dev_index;
 	_fix_numa_ids(&pmem_md->md, &zi_pmem->mdt.s_dev_list);
 
 	pmem_size = md_p2o(md_t1_blocks(&pmem_md->md));
@@ -576,7 +662,8 @@ static int _copy_outputs(struct zufc_thread *zt, void *arg)
 	if (!hdr->out_len)
 		return 0;
 
-	if ((hdr->err == -EZUFS_RETRY) || (hdr->out_max < hdr->out_len)) {
+	if ((hdr->err == -EZUFS_RETRY && zt->zdo->oh) ||
+	    (hdr->out_max < hdr->out_len)) {
 		if (WARN_ON(!zt->zdo->oh)) {
 			zuf_err("Trouble op(%s) out_max=%d out_len=%d\n",
 				zuf_op_name(hdr->operation),
@@ -750,7 +837,13 @@ channel_busy:
 
 	_zuf_put_cpu();
 
-	relay_fss_wakeup_app_wait(&zt->relay, NULL);
+	if (relay_fss_wakeup_app_wait(&zt->relay) == -ERESTARTSYS) {
+		struct zufs_ioc_hdr *opt_hdr = zt->opt_buff;
+
+		opt_hdr->flags |= ZUFS_H_INTR;
+
+		relay_fss_wakeup_app_wait_cont(&zt->relay);
+	}
 
 	/* restore cpu affinity after wakeup */
 	cpumask_copy(&app->cpus_allowed, &zt->relay.cpus_allowed);
@@ -976,6 +1069,8 @@ static int _zu_break(struct file *filp, void *parg)
 	mb(); /* TODO how to schedule on all CPU's */
 
 	for (i = 0; i < zri->_ztp->_max_zts; ++i) {
+		if (unlikely(!cpu_active(i)))
+			continue;
 		for (c = 0; c < zri->_ztp->_max_channels; ++c) {
 			struct zufc_thread *zt = _zt_from_cpu(zri, i, c);
 
@@ -1013,6 +1108,10 @@ long zufc_ioctl(struct file *file, unsigned int cmd, ulong arg)
 		return _zu_ebuff_alloc(file, parg);
 	case ZU_IOC_IOMAP_EXEC:
 		return _zu_iomap_exec(file, parg);
+	case ZU_IOC_PRIVATE_MOUNT:
+		return _zu_private_mounter(file, parg);
+	case ZU_IOC_PRIVATE_UMOUNT:
+		return _zu_private_mounter_release(file);
 	case ZU_IOC_BREAK_ALL:
 		return _zu_break(file, parg);
 	default:
@@ -1035,6 +1134,8 @@ int zufc_release(struct inode *inode, struct file *file)
 	case zlfs_e_mout_thread:
 		zufc_mounter_release(file);
 		return 0;
+	case zlfs_e_private_mount:
+		_zu_private_mounter_release(file);
 	case zlfs_e_pmem:
 		/* NOTHING to clean for pmem file yet */
 		/* zuf_pmem_release(file);*/
@@ -1051,7 +1152,7 @@ int zufc_release(struct inode *inode, struct file *file)
 
 static int zuf_zt_fault(struct vm_fault *vmf)
 {
-	zuf_err("should not fault\n");
+	zuf_err("should not fault pgoff=0x%lx\n", vmf->pgoff);
 	return VM_FAULT_SIGBUS;
 }
 
@@ -1062,8 +1163,8 @@ static const struct vm_operations_struct zuf_vm_ops = {
 static int _zufc_zt_mmap(struct file *file, struct vm_area_struct *vma,
 			 struct zufc_thread *zt)
 {
-	/* Tell Kernel We will only access on a single core */
-	vma->vm_flags |= VM_MIXEDMAP;
+	/* VM_PFNMAP for zap_vma_ptes() Careful! */
+	vma->vm_flags |= VM_PFNMAP;
 	vma->vm_ops = &zuf_vm_ops;
 
 	zt->vma = vma;
@@ -1146,7 +1247,7 @@ static const struct vm_operations_struct zuf_obuff_ops = {
 static int _zufc_obuff_mmap(struct file *file, struct vm_area_struct *vma,
 			    struct zufc_thread *zt)
 {
-	vma->vm_flags |= VM_MIXEDMAP;
+	vma->vm_flags |= VM_PFNMAP;
 	vma->vm_ops = &zuf_obuff_ops;
 
 	zt->opt_buff_vma = vma;
@@ -1227,7 +1328,7 @@ static int zufc_ebuff_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct zu_exec_buff *ebuff = _ebuff_from_file(vma->vm_file);
 
-	vma->vm_flags |= VM_MIXEDMAP;
+	vma->vm_flags |= VM_PFNMAP;
 	vma->vm_ops = &zuf_ebuff_ops;
 
 	ebuff->vma = vma;

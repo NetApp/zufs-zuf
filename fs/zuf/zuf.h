@@ -37,6 +37,7 @@ enum zlfs_e_special_file {
 	zlfs_e_mout_thread,
 	zlfs_e_pmem,
 	zlfs_e_dpp_buff,
+	zlfs_e_private_mount,
 };
 
 struct zuf_special_file {
@@ -50,6 +51,11 @@ struct zuf_pmem {
 	struct list_head list;
 	struct zuf_special_file hdr;
 	uint pmem_id;
+};
+
+struct zuf_private_mount_info {
+	struct zuf_special_file zsf;
+	struct super_block *sb;
 };
 
 /* This is the zuf-root.c mini filesystem */
@@ -144,6 +150,7 @@ enum {
 	ZUF_MOUNT_FAILED	= 0x000010,	/* mark a failed-mount */
 	ZUF_MOUNT_DAX		= 0x000020,	/* mounted with dax option */
 	ZUF_MOUNT_POSIXACL	= 0x000040,	/* mounted with posix acls */
+	ZUF_MOUNT_PRIVATE	= 0x000080,	/* private mount from runner */
 };
 
 #define clear_opt(sbi, opt)       (sbi->s_mount_opt &= ~ZUF_MOUNT_ ## opt)
@@ -156,12 +163,13 @@ enum {
 struct zuf_inode_info {
 	struct inode		vfs_inode;
 
+	/* Lock for xattr operations */
+	struct rw_semaphore	xa_rwsem;
 	/* Stuff for mmap write */
 	struct rw_semaphore	in_sync;
 	struct list_head	i_mmap_dirty;
 	atomic_t		write_mapped;
 	atomic_t		vma_count;
-	struct page		*zero_page; /* TODO: Remove */
 
 	/* cookies from Server */
 	struct zus_inode	*zi;
@@ -185,6 +193,7 @@ struct zuf_sb_info {
 
 	/* Mount options */
 	unsigned long	s_mount_opt;
+	char		*pmount_dev; /* for private mount */
 
 	spinlock_t		s_mmap_dirty_lock;
 	struct list_head	s_mmap_dirty;
@@ -301,6 +310,26 @@ static inline void ZUF_CHECK_I_W_LOCK(struct inode *inode)
 	if (WARN_ON(down_write_trylock(&inode->i_rwsem)))
 		up_write(&inode->i_rwsem);
 #endif
+}
+
+static inline void zuf_xar_lock(struct zuf_inode_info *zii)
+{
+	down_read(&zii->xa_rwsem);
+}
+
+static inline void zuf_xar_unlock(struct zuf_inode_info *zii)
+{
+	up_read(&zii->xa_rwsem);
+}
+
+static inline void zuf_xaw_lock(struct zuf_inode_info *zii)
+{
+	down_write(&zii->xa_rwsem);
+}
+
+static inline void zuf_xaw_unlock(struct zuf_inode_info *zii)
+{
+	up_write(&zii->xa_rwsem);
 }
 
 /* CAREFUL: Needs an sfence eventually, after this call */

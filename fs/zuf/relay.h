@@ -71,17 +71,32 @@ static inline void relay_fss_wakeup(struct relay *relay)
 	wake_up(&relay->fss_wq);
 }
 
-static inline void relay_fss_wakeup_app_wait(struct relay *relay,
-					     spinlock_t *spinlock)
+static inline int relay_fss_wakeup_app_wait(struct relay *relay)
 {
 	relay->app_waiting = true;
 
 	relay_fss_wakeup(relay);
 
 	relay->app_wakeup = false;
-	if (spinlock)
-		spin_unlock(spinlock);
 
+	return wait_event_interruptible(relay->app_wq, relay->app_wakeup);
+}
+
+static inline
+void relay_fss_wakeup_app_wait_spin(struct relay *relay, spinlock_t *spinlock)
+{
+	relay->app_waiting = true;
+
+	relay_fss_wakeup(relay);
+
+	relay->app_wakeup = false;
+	spin_unlock(spinlock);
+
+	wait_event(relay->app_wq, relay->app_wakeup);
+}
+
+static inline void relay_fss_wakeup_app_wait_cont(struct relay *relay)
+{
 	wait_event(relay->app_wq, relay->app_wakeup);
 }
 

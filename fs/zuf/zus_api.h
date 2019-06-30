@@ -16,9 +16,16 @@
 
 #include <linux/types.h>
 #include <linux/uuid.h>
+#include <linux/fiemap.h>
 #include <stddef.h>
 
 #include "md_def.h"
+
+#ifdef __cplusplus
+#define NAMELESS(X) X
+#else
+#define NAMELESS(X)
+#endif
 
 /*
  * Version rules:
@@ -71,6 +78,11 @@
 #ifndef ALIGN
 #define ALIGN(x, a)		ALIGN_MASK(x, (typeof(x))(a) - 1)
 #define ALIGN_MASK(x, mask)	(((x) + (mask)) & ~(mask))
+#endif
+
+#ifndef likely
+#define likely(x_)	__builtin_expect(!!(x_), 1)
+#define unlikely(x_)	__builtin_expect(!!(x_), 0)
 #endif
 
 /* RHEL/CentOS7 specifics */
@@ -127,15 +139,30 @@ static inline ulong zu_dpp_t_val(zu_dpp_t t)
 	return t & ~0x7;
 }
 
-static inline zu_dpp_t enc_zu_dpp_t(ulong v, uint pool)
+static inline zu_dpp_t zu_enc_dpp_t(ulong v, uint pool)
 {
 	return v | pool;
+}
+
+static inline ulong zu_dpp_t_bn(zu_dpp_t t)
+{
+	return t >> 3;
+}
+
+static inline zu_dpp_t zu_enc_dpp_t_bn(ulong v, uint pool)
+{
+	return zu_enc_dpp_t(v << 3, pool);
 }
 
 /*
  * Structure of a ZUS inode.
  * This is all the inode fields
  */
+
+/* See VFS inode flags at fs.h. As ZUFS support flags up to the 7th bit, we
+ * use higher bits for ZUFS specific flags
+ * */
+#define ZUFS_S_IMMUTABLE 04000
 
 /* zus_inode size */
 #define ZUFS_INODE_SIZE 128    /* must be power of two */
@@ -159,7 +186,7 @@ struct zus_inode {
 	__le32	i_gid;		/* Group Id */
 	__le64	i_xattr;	/* FS-specific Extended attribute block */
 	__le64	i_generation;	/* File version (for NFS) */
-/* 96*/	union {
+/* 96*/	union NAMELESS(_I_U) {
 		__le32	i_rdev;		/* special-inode major/minor etc ...*/
 		u8	i_symlink[32];	/* if i_size < sizeof(i_symlink) */
 		__le64	i_sym_dpp;	/* Link location if long symlink */
@@ -197,7 +224,8 @@ struct zufs_ioc_hdr {
 	__u16 out_start;/* Start of output parameters (to caller) */
 	__u16 out_len;	/* How much to be copied *from* zus to caller */
 			/* can be modified by zus */
-	__u32 operation;/* One of e_zufs_operation */
+	__u16 operation;/* One of e_zufs_operation */
+	__u16 flags;	/* flags */
 	__u32 offset;	/* Start of user buffer in ZT mmap */
 	__u32 len;	/* Len of user buffer in ZT mmap */
 };
@@ -298,6 +326,10 @@ struct  zufs_ioc_mount {
 #define ZU_IOC_MOUNT	_IOWR('Z', 11, struct zufs_ioc_mount)
 
 /* pmem  */
+struct zufs_cpu_set {
+	ulong bits[16];
+};
+
 struct zufs_ioc_numa_map {
 	/* Set by zus */
 	struct zufs_ioc_hdr hdr;
@@ -311,11 +343,12 @@ struct zufs_ioc_numa_map {
 
 	/* This indicates that NOT all nodes have @max_cpu_per_node cpus */
 	bool	nodes_not_symmetrical;
+	__u8	__pad[19]; /* align cpu_set_per_node to next cache-line */
 
 	/* Variable size must keep last
-	 * size @online_cpus
+	 * size @possible_nodes
 	 */
-	__u8	cpu_to_node[];
+	struct zufs_cpu_set cpu_set_per_node[];
 };
 #define ZU_IOC_NUMA_MAP	_IOWR('Z', 12, struct zufs_ioc_numa_map)
 
@@ -326,6 +359,7 @@ struct zufs_ioc_pmem {
 
 	/* Returned to zus */
 	struct md_dev_table mdt;
+	int dev_index;
 
 };
 /* GRAB is never ungrabed umount or file close cleans it all */
@@ -362,6 +396,7 @@ struct zufs_ioc_wait_operation {
 enum e_zufs_operation {
 	ZUFS_OP_NULL = 0,
 	ZUFS_OP_STATFS,
+	ZUFS_OP_SHOW_OPTIONS,
 
 	ZUFS_OP_NEW_INODE,
 	ZUFS_OP_FREE_INODE,
@@ -390,9 +425,25 @@ enum e_zufs_operation {
 	ZUFS_OP_XATTR_GET,
 	ZUFS_OP_XATTR_SET,
 	ZUFS_OP_XATTR_LIST,
+	ZUFS_OP_FIEMAP,
 
 	ZUFS_OP_BREAK,		/* Kernel telling Server to exit */
 	ZUFS_OP_MAX_OPT,
+};
+
+enum e_zufs_hdr_flags {
+	ZUFS_H_INTR	= (1 << 0),
+};
+
+#define ZUFS_MO_MAX	512
+
+struct zufs_ioc_mount_options {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_sb_info *zus_sbi;
+
+	/* OUT */
+	char	buf[0];
 };
 
 /* ZUFS_OP_STATFS */
@@ -502,6 +553,7 @@ enum {E_ZDE_HDR_SIZE =
 	offsetof(struct zufs_dir_entry, zstr) + offsetof(struct zufs_str, name),
 };
 
+#ifndef __cplusplus
 static inline void zufs_readdir_iter_init(struct zufs_readdir_iter *rdi,
 					  struct zufs_ioc_readdir *ioc_readdir,
 					  void *app_ptr)
@@ -557,6 +609,7 @@ static inline bool zufs_zde_emit(struct zufs_readdir_iter *rdi, __u64 ino,
 
 	return true;
 }
+#endif /* ndef __cplusplus */
 
 struct zufs_ioc_mmap_close {
 	struct zufs_ioc_hdr hdr;
@@ -626,6 +679,16 @@ struct zufs_ioc_seek {
 	__u64 offset_out;
 };
 
+enum e_ZUFS_IOCTL_UFLAGS {
+	ZUF_REALLOC =		0x1,
+	ZUF_FREEZE_REQ =	0x2,
+};
+
+enum e_ZUFS_IOCTL_KFLAGS {
+	ZUF_FSFROZEN =		0x1,
+	ZUF_CAP_ADMIN =		0x2,
+};
+
 /* ZUFS_OP_IOCTL */
 struct zufs_ioc_ioctl {
 	struct zufs_ioc_hdr hdr;
@@ -635,9 +698,14 @@ struct zufs_ioc_ioctl {
 	__u64 time;
 
 	/* OUT */
-	union {
-		__u32 new_size;
-		char arg[0];
+	__u32 kflags; /* zuf/kernel state and flags*/
+	char out_start[0];
+	struct {
+		__u32 uflags; /* zus state and flags */
+		union {
+			__u32 new_size;
+			char arg[0];
+		};
 	};
 };
 
@@ -659,6 +727,61 @@ struct zufs_ioc_xattr {
 	__u32	user_buf_size;
 	char	buf[0];
 } __packed;
+
+
+/* ZUFS_OP_FIEMAP */
+struct zufs_ioc_fiemap {
+	struct zufs_ioc_hdr hdr;
+
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64	start;
+	__u64	length;
+	__u32	flags;
+	__u32	extents_max;
+
+	/* OUT */
+	__u32	extents_mapped;
+	__u32	pad;
+
+} __packed;
+
+struct zufs_fiemap_extent_info {
+	__u32 fi_flags;
+	__u32 fi_extents_mapped;
+	__u32 fi_extents_max;
+	struct fiemap_extent *fi_extents_start;
+};
+
+static inline
+int zufs_fiemap_fill_next_extent(struct zufs_fiemap_extent_info *fieinfo,
+				 __u64 logical, __u64 phys,
+				 __u64 len, __u32 flags)
+{
+	struct fiemap_extent *dest = fieinfo->fi_extents_start;
+
+	if (fieinfo->fi_extents_max == 0) {
+		fieinfo->fi_extents_mapped++;
+		return (flags & FIEMAP_EXTENT_LAST) ? 1 : 0;
+	}
+
+	if (fieinfo->fi_extents_mapped >= fieinfo->fi_extents_max)
+		return 1;
+
+	dest += fieinfo->fi_extents_mapped;
+	dest->fe_logical = logical;
+	dest->fe_physical = phys;
+	dest->fe_length = len;
+	dest->fe_flags = flags;
+
+	fieinfo->fi_extents_mapped++;
+	if (fieinfo->fi_extents_mapped == fieinfo->fi_extents_max)
+		return 1;
+
+	return (flags & FIEMAP_EXTENT_LAST) ? 1 : 0;
+}
+
+
 
 /* ~~~~ io_map structures && IOCTL(s) ~~~~ */
 /*
@@ -686,6 +809,8 @@ enum ZUFS_IOM_TYPE {
 	IOM_T2_ZUSMEM_READ = 8,
 
 	IOM_UNMAP	= 9,
+	IOM_WBINV	= 10,
+	IOM_REPEAT	= 11,
 
 	IOM_NUM_LEGAL_OPT,
 };
@@ -693,24 +818,51 @@ enum ZUFS_IOM_TYPE {
 #define ZUFS_IOM_VAL_BITS	56
 #define ZUFS_IOM_FIRST_VAL_MASK ((1UL << ZUFS_IOM_VAL_BITS) - 1)
 
-static inline ulong _zufs_iom_first_val(__u64 *iom_elemets)
-{
-	return *iom_elemets & ZUFS_IOM_FIRST_VAL_MASK;
-}
-
 static inline enum ZUFS_IOM_TYPE _zufs_iom_opt_type(__u64 *iom_e)
 {
 	uint ret = (*iom_e) >> ZUFS_IOM_VAL_BITS;
 
 	if (ret >= IOM_NUM_LEGAL_OPT)
 		return IOM_NONE;
-	return ret;
+	return (enum ZUFS_IOM_TYPE)ret;
 }
 
 static inline bool _zufs_iom_pop(__u64 *iom_e)
 {
 	return _zufs_iom_opt_type(iom_e) != IOM_NONE;
 }
+
+static inline ulong _zufs_iom_first_val(__u64 *iom_elemets)
+{
+	return *iom_elemets & ZUFS_IOM_FIRST_VAL_MASK;
+}
+
+static inline void _zufs_iom_enc_type_val(__u64 *ptr, enum ZUFS_IOM_TYPE type,
+					 ulong val)
+{
+	*ptr = (__u64)val | ((__u64)type << ZUFS_IOM_VAL_BITS);
+}
+
+static inline ulong _zufs_iom_t1_bn(__u64 val)
+{
+	if (unlikely(_zufs_iom_opt_type(&val) != IOM_T1_READ))
+		return -1;
+
+	return zu_dpp_t_bn(_zufs_iom_first_val(&val));
+}
+
+static inline void _zufs_iom_enc_bn(__u64 *ptr, ulong bn, uint pool)
+{
+	_zufs_iom_enc_type_val(ptr, IOM_T1_READ, zu_enc_dpp_t_bn(bn, pool));
+}
+
+/* IOM_T1_WRITE / IOM_T1_READ
+ * May be followed by an IOM_REPEAT
+ */
+struct zufs_iom_t1_io {
+	/* Special dpp_t that denote a page ie: bn << 3 | zu_dpp_t_pool  */
+	__u64	t1_val;
+};
 
 /* IOM_T2_WRITE / IOM_T2_READ */
 struct zufs_iom_t2_io {
@@ -765,7 +917,7 @@ struct zufs_iomap {
 
 	__u32	iom_max;	/* num of __u64 allocated	 */
 	__u32	iom_n;		/* num of valid __u64 in iom_e	 */
-	__u64	iom_e[];	/* encoded operations to execute */
+	__u64	iom_e[0];	/* encoded operations to execute */
 
 	/* This struct must be last */
 };
@@ -826,6 +978,18 @@ struct zufs_ioc_iomap_exec {
 #define ZU_IOC_IOMAP_EXEC	_IOWR('Z', 18, struct zufs_ioc_iomap_exec)
 
 /*
+ * Mount locally with a zus-runner process
+ */
+#define ZUFS_PMDEV_OPT "zpmdev"
+struct zufs_ioc_mount_private {
+	struct zufs_ioc_hdr	hdr;
+	int			mount_fd; /* kernel cookie */
+	struct register_fs_info	rfi;
+	struct zufs_mount_info	zmi; /* must be last */
+};
+#define ZU_IOC_PRIVATE_MOUNT	_IOWR('Z', 19, struct zufs_ioc_mount_private)
+#define ZU_IOC_PRIVATE_UMOUNT	_IOWR('Z', 20, struct zufs_ioc_mount_private)
+/*
  * ZUFS_OP_READ / ZUFS_OP_WRITE
  *       also
  * ZUFS_OP_GET_BLOCK / ZUFS_OP_PUT_BLOCK
@@ -850,7 +1014,7 @@ struct zufs_ioc_IO {
 	__u64 flags;		/* read/write flags IN */
 
 	/* in / OUT */
-	union {
+	union NAMELESS(_IOC_IO_U) {
 		/* For reads */
 		struct __zufs_ra {
 			ulong start;
@@ -864,10 +1028,8 @@ struct zufs_ioc_IO {
 			__u32  len;
 		} wr_unmap;
 		struct __zufs_get_put_block {
-			zu_dpp_t pmem_bn; /* zero means: map-read a hole */
 			__u32 rw;	  /* rw flags also return from GB */
 			__u32 ret_flags;  /* One of ZUFS_GBF_XXX */
-			void *priv;	  /**/
 		} gp_block;
 	};
 
