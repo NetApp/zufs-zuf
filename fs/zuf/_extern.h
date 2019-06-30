@@ -108,6 +108,10 @@ struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
 				   struct zus_sb_info *zus_sbi);
 
+int zuf_private_mount(struct zuf_root_info *zri, struct register_fs_info *rfi,
+		      struct zufs_mount_info *zmi, struct super_block **sb_out);
+int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb);
+
 /* zuf-core.c */
 int zufc_zts_init(struct zuf_root_info *zri); /* Some private types in core */
 void zufc_zts_fini(struct zuf_root_info *zri);

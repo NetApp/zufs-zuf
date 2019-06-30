@@ -27,6 +27,7 @@ enum {
 	Opt_pedantic,
 	Opt_ephemeral,
 	Opt_dax,
+	Opt_zpmdev,
 	Opt_err
 };
 
@@ -35,6 +36,7 @@ static const match_table_t tokens = {
 	{ Opt_pedantic,		"pedantic=%d"		},
 	{ Opt_ephemeral,	"ephemeral"		},
 	{ Opt_dax,		"dax"			},
+	{ Opt_zpmdev,		ZUFS_PMDEV_OPT"=%s"	},
 	{ Opt_err,		NULL			},
 };
 
@@ -46,6 +48,7 @@ static int _parse_options(struct zuf_sb_info *sbi, const char *data,
 	substring_t args[MAX_OPT_ARGS];
 	int err = 0;
 	bool ephemeral = false;
+	bool silent = test_opt(sbi, SILENT);
 	size_t mount_options_len = 0;
 
 	/* no options given */
@@ -53,8 +56,10 @@ static int _parse_options(struct zuf_sb_info *sbi, const char *data,
 		return 0;
 
 	options = orig_options = kstrdup(data, GFP_KERNEL);
-	if (!options)
+	if (!options) {
+		zuf_err_cnd(silent, "kstrdup => -ENOMEM\n");
 		return -ENOMEM;
+	}
 
 	while ((p = strsep(&options, ",")) != NULL) {
 		int token;
@@ -83,6 +88,13 @@ static int _parse_options(struct zuf_sb_info *sbi, const char *data,
 		case Opt_dax:
 			set_opt(sbi, DAX);
 			break;
+		case Opt_zpmdev:
+			if (unlikely(!test_opt(sbi, PRIVATE)))
+				goto bad_opt;
+			sbi->pmount_dev = match_strdup(&args[0]);
+			if (sbi->pmount_dev == NULL)
+				goto no_mem;
+			break;
 		default: {
 			if (mount_options_len != 0) {
 				po->mount_options[mount_options_len] = ',';
@@ -101,8 +113,12 @@ out:
 	return err;
 
 bad_opt:
-	zuf_warn_cnd(test_opt(sbi, SILENT), "Bad mount option: \"%s\"\n", p);
+	zuf_warn_cnd(silent, "Bad mount option: \"%s\"\n", p);
 	err = -EINVAL;
+	goto out;
+no_mem:
+	zuf_warn_cnd(silent, "Not enough memory to parse options");
+	err = -ENOMEM;
 	goto out;
 }
 
@@ -184,18 +200,20 @@ static void _sb_mwtime_now(struct super_block *sb, struct md_dev_table *zdt)
 	/* TOZO _persist_md(sb, &zdt->s_mtime, 2*sizeof(zdt->s_mtime)); */
 }
 
+static void _clean_bdi(struct super_block *sb)
+{
+	if (sb->s_bdi != &noop_backing_dev_info) {
+		bdi_put(sb->s_bdi);
+		sb->s_bdi = &noop_backing_dev_info;
+	}
+}
+
 static int _setup_bdi(struct super_block *sb, const char *device_name)
 {
 	int err;
 
-	if (sb->s_bdi && (sb->s_bdi != &noop_backing_dev_info)) {
-		/*
-		 * sb->s_bdi points to blkdev's bdi however we want to redirect
-		 * it to our private bdi...
-		 */
-		bdi_put(sb->s_bdi);
-	}
-	sb->s_bdi = &noop_backing_dev_info;
+	if (sb->s_bdi)
+		_clean_bdi(sb);
 
 	err = super_setup_bdi_name(sb, "zuf-%s", device_name);
 	if (unlikely(err)) {
@@ -298,6 +316,14 @@ static void zuf_put_super(struct super_block *sb)
 {
 	struct zuf_sb_info *sbi = SBI(sb);
 
+	/* FIXME: This is because of a Kernel BUG (in v4.20) which
+	 * sometimes complains in _setup_bdi() on a recycle_mount that sysfs
+	 * bdi already exists. Cleaning here solves it.
+	 * Calling synchronize_rcu in zuf_kill_sb() after the call to
+	 * kill_block_super() does NOT solve it.
+	 */
+	_clean_bdi(sb);
+
 	if (sbi->zus_sbi) {
 		struct zufs_ioc_mount zim = {
 			.zmi.zus_sbi = sbi->zus_sbi,
@@ -331,6 +357,123 @@ struct __fill_super_params {
 	char *mount_options;
 };
 
+int zuf_private_mount(struct zuf_root_info *zri, struct register_fs_info *rfi,
+		      struct zufs_mount_info *zmi, struct super_block **sb_out)
+{
+	const char *dev_path = NULL;
+	struct zuf_sb_info *sbi;
+	struct super_block *sb;
+	char *mount_options;
+	bool silent = false;
+	struct mdt_check mc = {
+		.alloc_mask	= ZUFS_ALLOC_MASK,
+		.major_ver	= rfi->FS_ver_major,
+		.minor_ver	= rfi->FS_ver_minor,
+		.magic		= rfi->FS_magic,
+
+		.silent = silent,
+		.private_mnt = true,
+	};
+	int err;
+
+	sb = kzalloc(sizeof(struct super_block), GFP_KERNEL);
+	if (unlikely(!sb)) {
+		zuf_err_cnd(silent, "Not enough memory to allocate sb\n");
+		return -ENOMEM;
+	}
+
+	sbi = kzalloc(sizeof(struct zuf_sb_info), GFP_KERNEL);
+	if (unlikely(!sbi)) {
+		zuf_err_cnd(silent, "Not enough memory to allocate sbi\n");
+		kfree(sb);
+		return -ENOMEM;
+	}
+
+	sb->s_fs_info = sbi;
+	sbi->sb = sb;
+	set_opt(sbi, PRIVATE);
+
+	mount_options = kstrndup(zmi->po.mount_options,
+				 zmi->po.mount_options_len, GFP_KERNEL);
+	if (unlikely(!mount_options)) {
+		zuf_err_cnd(silent, "Not enough memory\n");
+		err = -ENOMEM;
+		goto fail;
+	}
+
+	memset(zmi->po.mount_options, 0, zmi->po.mount_options_len);
+
+	err = _parse_options(sbi, mount_options, 0, &zmi->po);
+	if (unlikely(err)) {
+		zuf_err_cnd(silent, "option parsing failed => %d\n", err);
+		goto fail;
+	}
+
+	if (unlikely(!sbi->pmount_dev)) {
+		zuf_err_cnd(silent, "private mount missing mountdev option\n");
+		err = -EINVAL;
+		goto fail;
+	}
+
+	zmi->po.mount_options_len = strlen(zmi->po.mount_options);
+
+	sbi->md = md_alloc(sizeof(struct zuf_pmem));
+	if (IS_ERR(sbi->md)) {
+		err = PTR_ERR(sbi->md);
+		sbi->md = NULL;
+		goto fail;
+	}
+
+	mc.holder = sbi;
+	err = md_init(sbi->md, sbi->pmount_dev, &mc, &dev_path);
+	if (unlikely(err)) {
+		zuf_err_cnd(silent, "md_init failed! => %d\n", err);
+		goto fail;
+	}
+
+	zuf_dbg_verbose("private mount of %s\n", dev_path);
+
+	err = _sb_add(zri, sb, &zmi->sb_id);
+	if (unlikely(err)) {
+		zuf_err_cnd(silent, "_sb_add failed => %d\n", err);
+		goto fail;
+	}
+
+	zuf_add_pmem(zri, sbi->md);
+	zmi->pmem_kern_id = zuf_pmem_id(sbi->md);
+
+	kfree(dev_path);
+
+	*sb_out = sb;
+
+	return 0;
+
+fail:
+	if (sbi->md)
+		md_fini(sbi->md, NULL);
+	kfree(dev_path);
+	kfree(mount_options);
+	kfree(sbi->pmount_dev);
+	kfree(sbi);
+	kfree(sb);
+
+	return err;
+}
+
+int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb)
+{
+	struct zuf_sb_info *sbi = SBI(sb);
+
+	zuf_rm_pmem(sbi->md);
+	_sb_remove(zri, sb);
+	md_fini(sbi->md, NULL);
+	kfree(sbi->pmount_dev);
+	kfree(sbi);
+	kfree(sb);
+
+	return 0;
+}
+
 static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct zuf_sb_info *sbi = NULL;
@@ -352,14 +495,18 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	zim_size = sizeof(zim) + mount_options_len;
 	ioc_mount = big_alloc(zim_size, sizeof(zim), &zim,
 			      GFP_KERNEL | __GFP_ZERO, &bat);
-	if (unlikely(!ioc_mount))
+	if (unlikely(!ioc_mount)) {
+		zuf_err_cnd(silent, "big_alloc(%ld) => -ENOMEM\n", zim_size);
 		return -ENOMEM;
+	}
 
 	ioc_mount->zmi.po.mount_options_len = mount_options_len;
 
 	err = _sb_add(zuf_fst(sb)->zri, sb, &ioc_mount->zmi.sb_id);
-	if (unlikely(err))
+	if (unlikely(err)) {
+		zuf_err_cnd(silent, "_sb_add failed => %d\n", err);
 		goto error;
+	}
 
 	sbi = kzalloc(sizeof(struct zuf_sb_info), GFP_KERNEL);
 	if (!sbi) {
@@ -398,8 +545,10 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	ioc_mount->zmi.pmem_kern_id = zuf_pmem_id(sbi->md);
 	err = zufc_dispatch_mount(ZUF_ROOT(sbi), zuf_fst(sb)->zus_zfi,
 				  ZUFS_M_MOUNT, ioc_mount);
-	if (unlikely(err))
+	if (unlikely(err)) {
+		zuf_err_cnd(silent, "zufc_dispatch_mount failed => %d\n", err);
 		goto error;
+	}
 	sbi->zus_sbi = ioc_mount->zmi.zus_sbi;
 
 	/* Init with default values */
@@ -420,13 +569,14 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 			  &exist);
 	if (IS_ERR(root_i)) {
 		err = PTR_ERR(root_i);
+		zuf_err_cnd(silent, "zuf_iget failed => %d\n", err);
 		goto error;
 	}
 	WARN_ON(exist);
 
 	sb->s_root = d_make_root(root_i);
 	if (!sb->s_root) {
-		zuf_err_cnd(silent, "get tozu root inode failed\n");
+		zuf_err_cnd(silent, "d_make_root root inode failed\n");
 		iput(root_i); /* undo zuf_iget */
 		err = -ENOMEM;
 		goto error;
@@ -489,14 +639,39 @@ static int zuf_statfs(struct dentry *d, struct kstatfs *buf)
 	return 0;
 }
 
+struct __mount_options {
+	struct zufs_ioc_mount_options imo;
+	char buf[ZUFS_MO_MAX];
+};
+
 static int zuf_show_options(struct seq_file *seq, struct dentry *root)
 {
 	struct zuf_sb_info *sbi = SBI(root->d_sb);
+	struct __mount_options mo = {
+		.imo.hdr.in_len = sizeof(struct zufs_ioc_mount_options),
+		.imo.hdr.out_start = offsetof(struct zufs_ioc_mount_options, buf),
+		.imo.hdr.out_len = 0,
+		.imo.hdr.out_max = sizeof(mo.buf),
+		.imo.hdr.operation = ZUFS_OP_SHOW_OPTIONS,
+		.imo.zus_sbi = sbi->zus_sbi,
+	};
+	int err;
 
 	if (test_opt(sbi, EPHEMERAL))
 		seq_puts(seq, ",ephemeral");
 	if (test_opt(sbi, DAX))
 		seq_puts(seq, ",dax");
+
+	err = zufc_dispatch(ZUF_ROOT(sbi), &mo.imo.hdr, NULL, 0);
+	if (unlikely(err)) {
+		zuf_err("zufs_dispatch failed op=ZUS_OP_SHOW_OPTIONS => %d\n", err);
+		/* NOTE: if zusd crashed and we try to run 'umount', it will
+		 * SEGFAULT because zufc_dispatch will return -EFAULT.
+		 * Just return 0 as if the FS has no specific mount options.
+		 */
+		return 0;
+	}
+	seq_puts(seq, mo.buf);
 
 	return 0;
 }
@@ -679,7 +854,7 @@ static void _init_once(void *foo)
 	inode_init_once(&zii->vfs_inode);
 	INIT_LIST_HEAD(&zii->i_mmap_dirty);
 	zii->zi = NULL;
-	zii->zero_page = NULL;
+	init_rwsem(&zii->xa_rwsem);
 	init_rwsem(&zii->in_sync);
 	atomic_set(&zii->vma_count, 0);
 	atomic_set(&zii->write_mapped, 0);

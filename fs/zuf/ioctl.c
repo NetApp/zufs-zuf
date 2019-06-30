@@ -43,12 +43,13 @@ static int _ioctl_dispatch(struct inode *inode, uint cmd, ulong arg)
 	size_t size;
 	bool retry = false;
 	int err;
+	bool freeze = false;
 
-again:
+realloc:
 	size = sizeof(*ioc_ioctl) + ioc_size;
 
-	zuf_dbg_vfs("[%ld] cmd=0x%x arg=0x%lx size=0x%zx IOC(%d, %d, %zd)\n",
-		    inode->i_ino, cmd, arg, size, _IOC_TYPE(cmd),
+	zuf_dbg_vfs("[%ld] cmd=0x%x arg=0x%lx size=0x%zx cap_admin=%u IOC(%d, %d, %zd)\n",
+		    inode->i_ino, cmd, arg, size, capable(CAP_SYS_ADMIN), _IOC_TYPE(cmd),
 		    _IOC_NR(cmd), ioc_size);
 
 	ioc_ioctl = big_alloc(size, sizeof(ctl_alloc), &ctl_alloc, GFP_KERNEL,
@@ -58,12 +59,13 @@ again:
 
 	memset(ioc_ioctl, 0, sizeof(*ioc_ioctl));
 	ioc_ioctl->hdr.in_len = size;
-	ioc_ioctl->hdr.out_start = offsetof(struct zufs_ioc_ioctl, arg);
+	ioc_ioctl->hdr.out_start = offsetof(struct zufs_ioc_ioctl, out_start);
 	ioc_ioctl->hdr.out_max = size;
 	ioc_ioctl->hdr.out_len = 0;
 	ioc_ioctl->hdr.operation = ZUFS_OP_IOCTL;
 	ioc_ioctl->zus_ii = ZUII(inode)->zus_ii;
 	ioc_ioctl->cmd = cmd;
+	ioc_ioctl->kflags = capable(CAP_SYS_ADMIN) ? ZUF_CAP_ADMIN : 0;
 	timespec_to_mt(&ioc_ioctl->time, &time);
 
 	if (arg && ioc_size) {
@@ -73,14 +75,32 @@ again:
 		}
 	}
 
+dispatch:
 	err = zufc_dispatch(ZUF_ROOT(SBI(inode->i_sb)), &ioc_ioctl->hdr,
 			    NULL, 0);
 
 	if (!retry && err == -EZUFS_RETRY) {
-		ioc_size = ioc_ioctl->new_size - sizeof(*ioc_ioctl);
-		big_free(ioc_ioctl, bat);
 		retry = true;
-		goto again;
+		switch (ioc_ioctl->uflags) {
+		case ZUF_REALLOC:
+			ioc_size = ioc_ioctl->new_size - sizeof(*ioc_ioctl);
+			big_free(ioc_ioctl, bat);
+			goto realloc;
+		case ZUF_FREEZE_REQ:
+			err = freeze_super(inode->i_sb);
+			if (unlikely(err)) {
+				zuf_warn("unable to freeze fs err=%d\n", err);
+				goto out;
+			}
+			freeze = true;
+			ioc_ioctl->kflags |= ZUF_FSFROZEN;
+			goto dispatch;
+		default:
+			zuf_err("unkonwn ZUFS retry type uflags=%d\n",
+				ioc_ioctl->uflags);
+			err = -EINVAL;
+			goto out;
+		}
 	}
 
 	if (unlikely(err)) {
@@ -98,6 +118,14 @@ again:
 	}
 
 out:
+	if (freeze) {
+		int thaw_err = thaw_super(inode->i_sb);
+
+		if (unlikely(thaw_err))
+			zuf_err("post ioctl thaw file system failure err = %d\n",
+				 thaw_err);
+	}
+
 	big_free(ioc_ioctl, bat);
 
 	return err;
@@ -184,6 +212,9 @@ static int _ioc_setflags(struct inode *inode, uint __user *parg)
 
 	if (flags & ~ZUFS_SUPPORTED_FS_FLAGS)
 		return -EOPNOTSUPP;
+
+	if (zi->i_flags & ZUFS_S_IMMUTABLE)
+		return -EPERM;
 
 	inode_lock(inode);
 
