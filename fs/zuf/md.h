@@ -84,6 +84,10 @@ struct multi_devices {
 #endif /*! __KERNEL__*/
 };
 
+enum md_init_flags {
+	MD_I_F_PRIVATE		= (1UL << 0),
+};
+
 static inline __u64 md_p2o(ulong bn)
 {
 	return (__u64)bn << PAGE_SHIFT;
@@ -148,6 +152,11 @@ static inline struct md_dev_info *md_bn_t1_dev(struct multi_devices *md,
 						 ulong bn)
 {
 	return md->t1a.map[bn / md->t1a.bn_gcd];
+}
+
+static inline uuid_le *md_main_uuid(struct multi_devices *md)
+{
+	return &md_zdt(md)->s_dev_list.dev_ids[md->dev_index].uuid;
 }
 
 #ifdef __KERNEL__
@@ -292,6 +301,7 @@ struct mdt_check {
 
 	void *holder;
 	bool silent;
+	bool private_mnt;
 };
 
 /* md.c */

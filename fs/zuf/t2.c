@@ -267,6 +267,11 @@ int t2_io_add(struct t2_io_state *tis, ulong t2, struct page *page)
 	mdi = md_bn_t2_dev(tis->md, t2);
 	WARN_ON(!mdi);
 
+	if (unlikely(!mdi->bdev)) {
+		zuf_err("mdi->bdev == NULL!! t2=0x%lx\n", t2);
+		return -EFAULT;
+	}
+
 	local_t2 = md_t2_local_bn(tis->md, t2);
 	if (((local_t2 != (tis->last_t2 + 1)) && (tis->last_t2 != -1)) ||
 	   ((0 < tis->index) && (tis->index != mdi->index)))

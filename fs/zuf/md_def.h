@@ -42,7 +42,7 @@
 
 #endif /*  ndef __KERNEL__ */
 
-#define MDT_SIZE 2048
+#define MDT_SIZE 4096
 
 #define MD_DEV_NUMA_SHIFT		60
 #define MD_DEV_BLOCKS_MASK		0x0FFFFFFFFFFFFFFF

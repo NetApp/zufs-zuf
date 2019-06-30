@@ -123,10 +123,7 @@ int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!zsf || zsf->type != zlfs_e_pmem)
 		return -EPERM;
 
-
-	/* FIXME:  MIXEDMAP for the support of pmem-pages (Why?)
-	 */
-	vma->vm_flags |= VM_MIXEDMAP | VM_HUGEPAGE;
+	vma->vm_flags |= VM_HUGEPAGE;
 	vma->vm_ops = &t1_vm_ops;
 
 	zuf_dbg_vfs("[%ld] start=0x%lx end=0x%lx flags=0x%lx page_prot=0x%lx\n",

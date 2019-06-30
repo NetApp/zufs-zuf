@@ -206,7 +206,6 @@ bool md_mdt_check(struct md_dev_table *mdt,
 		  struct md_dev_table *main_mdt, struct block_device *bdev,
 		  struct mdt_check *mc)
 {
-	struct md_dev_table *mdt2 = (void *)mdt + MDT_SIZE;
 	struct md_dev_id *dev_id;
 	ulong bdev_size, super_size;
 
@@ -214,16 +213,9 @@ bool md_mdt_check(struct md_dev_table *mdt,
 
 	/* Do sanity checks on the superblock */
 	if (le32_to_cpu(mdt->s_magic) != mc->magic) {
-		if (le32_to_cpu(mdt2->s_magic) != mc->magic) {
-			md_warn_cnd(mc->silent,
-				     "Can't find a valid partition\n");
-			return false;
-		}
-
 		md_warn_cnd(mc->silent,
-			     "Magic error in super block: using copy\n");
-		/* Try to auto-recover the super block */
-		memcpy_flushcache(mdt, mdt2, sizeof(*mdt));
+			     "Magic error in super block: please run fsck\n");
+		return false;
 	}
 
 	if ((mc->major_ver != mdt_major_version(mdt)) ||
@@ -236,17 +228,9 @@ bool md_mdt_check(struct md_dev_table *mdt,
 	}
 
 	if (_csum_mismatch(mdt, mc->silent)) {
-		if (_csum_mismatch(mdt2, mc->silent)) {
-			md_warn_cnd(mc->silent,
-				    "checksum error in super block\n");
-			return false;
-		}
-
 		md_warn_cnd(mc->silent,
-			    "crc16 error in super block: using copy\n");
-		/* Try to auto-recover the super block */
-		memcpy_flushcache(mdt, mdt2, MDT_SIZE);
-		/* TODO(sagi): copy fixed mdt to shadow */
+			    "crc16 error in super block: please run fsck\n");
+		return false;
 	}
 
 	if (main_mdt) {
@@ -298,19 +282,21 @@ bool md_mdt_check(struct md_dev_table *mdt,
 	return true;
 }
 
-
 int md_set_sb(struct multi_devices *md, struct block_device *s_bdev,
 	      void *sb, int silent)
 {
+	struct md_dev_info *main_mdi = md_dev_info(md, md->dev_index);
 	int i;
 
-	for (i = 0; i < md->t1_count; ++i) {
+	main_mdi->bdev = s_bdev;
+
+	for (i = 0; i < md->t1_count + md->t2_count; ++i) {
 		struct md_dev_info *mdi;
 
 		if (i == md->dev_index)
 			continue;
 
-		mdi = md_t1_dev(md, i);
+		mdi = md_dev_info(md, i);
 		if (mdi->bdev->bd_super && (mdi->bdev->bd_super != sb)) {
 			md_warn_cnd(silent,
 				"!!! %s already mounted on a different FS => -EBUSY\n",
@@ -321,12 +307,12 @@ int md_set_sb(struct multi_devices *md, struct block_device *s_bdev,
 		mdi->bdev->bd_super = sb;
 	}
 
-	md_dev_info(md, md->dev_index)->bdev = s_bdev;
 	return 0;
 }
 
 void md_fini(struct multi_devices *md, struct block_device *s_bdev)
 {
+	struct md_dev_info *main_mdi = md_dev_info(md, md->dev_index);
 	int i;
 
 	kfree(md->t2a.map);
@@ -335,11 +321,16 @@ void md_fini(struct multi_devices *md, struct block_device *s_bdev)
 	for (i = 0; i < md->t1_count + md->t2_count; ++i) {
 		struct md_dev_info *mdi = md_dev_info(md, i);
 
-		md_t1_info_fini(mdi);
-		if (mdi->bdev && !_main_bdev(mdi->bdev))
-			mdi->bdev->bd_super = NULL;
+		if (i < md->t1_count)
+			md_t1_info_fini(mdi);
+		if (!mdi->bdev || i == md->dev_index)
+			continue;
+		mdi->bdev->bd_super = NULL;
 		_bdev_put(&mdi->bdev, s_bdev);
 	}
+
+	/* fini main_dev last please */
+	_bdev_put(&main_mdi->bdev, s_bdev);
 
 	kfree(md);
 }
@@ -678,7 +669,8 @@ out:
 		err = _md_init(md, mc, dev_list, mc->silent);
 		if (unlikely(err))
 			goto out2;
-		_bdev_put(&md_dev_info(md, md->dev_index)->bdev, NULL);
+		if (!(mc->private_mnt))
+			_bdev_put(&md_dev_info(md, md->dev_index)->bdev, NULL);
 	} else {
 		md_fini(md, NULL);
 	}
