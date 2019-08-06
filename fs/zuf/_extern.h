@@ -51,12 +51,20 @@ int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs);
 int zuf_init_inodecache(void);
 void zuf_destroy_inodecache(void);
 
+int zuf_8k_cache_init(void);
+void zuf_8k_cache_fini(void);
+
 struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 			 const char *dev_name, void *data);
-
+int zuf_private_mount(struct zuf_root_info *zri, struct register_fs_info *rfi,
+		      struct zufs_mount_info *zmi, struct super_block **sb_out);
+int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb);
 struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
 				   struct zus_sb_info *zus_sbi);
 
+/* inode.c */
+struct inode *zuf_iget(struct super_block *sb, struct zus_inode_info *zus_ii,
+		       zu_dpp_t _zi, bool *exist);
 /* t1.c */
 int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);
 

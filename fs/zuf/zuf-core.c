@@ -63,6 +63,8 @@ const char *zuf_op_name(enum e_zufs_operation op)
 	switch  (op) {
 		CASE_ENUM_NAME(ZUFS_OP_NULL);
 		CASE_ENUM_NAME(ZUFS_OP_BREAK);
+		CASE_ENUM_NAME(ZUFS_OP_STATFS);
+		CASE_ENUM_NAME(ZUFS_OP_SHOW_OPTIONS);
 	case ZUFS_OP_MAX_OPT:
 	default:
 		return "UNKNOWN";
@@ -288,6 +290,95 @@ static void zufc_mounter_release(struct file *file)
 			zmt->zim->hdr.err = 0;
 		spin_unlock(&zmt->lock);
 	}
+}
+
+static int _zu_private_mounter_release(struct file *file)
+{
+	struct zuf_root_info *zri = ZRI(file->f_inode->i_sb);
+	struct zuf_special_file *zsf = file->private_data;
+	struct zuf_private_mount_info *zpmi;
+	int err;
+
+	zpmi = container_of(zsf, struct zuf_private_mount_info, zsf);
+
+	err = zuf_private_umount(zri, zpmi->sb);
+
+	kfree(zpmi);
+
+	return err;
+}
+
+static int _zu_private_mounter(struct file *file, void *parg)
+{
+	struct super_block *sb = file->f_inode->i_sb;
+	struct zufs_ioc_mount_private *zip = NULL;
+	struct zuf_private_mount_info *zpmi;
+	struct zuf_root_info *zri = ZRI(sb);
+	struct zufs_ioc_hdr hdr;
+	__u32 is_umount;
+	ulong cp_ret;
+	int err = 0;
+
+	get_user(is_umount,
+		 &((struct zufs_ioc_mount_private *)parg)->is_umount);
+	if (is_umount)
+		return _zu_private_mounter_release(file);
+
+	if (unlikely(file->private_data)) {
+		zuf_err("One mount per runner please..\n");
+		return -EINVAL;
+	}
+
+	zpmi = kzalloc(sizeof(*zpmi), GFP_KERNEL);
+	if (unlikely(!zpmi)) {
+		zuf_err("alloc failed\n");
+		return -ENOMEM;
+	}
+
+	zpmi->zsf.type = zlfs_e_private_mount;
+	zpmi->zsf.file = file;
+
+	cp_ret = copy_from_user(&hdr, parg, sizeof(hdr));
+	if (unlikely(cp_ret)) {
+		zuf_err("copy_from_user(hdr) => %ld\n", cp_ret);
+		err = -EFAULT;
+		goto fail;
+	}
+
+	zip = kmalloc(hdr.in_len, GFP_KERNEL);
+	if (unlikely(!zip)) {
+		zuf_err("alloc failed\n");
+		err = -ENOMEM;
+		goto fail;
+	}
+
+	cp_ret = copy_from_user(zip, parg, hdr.in_len);
+	if (unlikely(cp_ret)) {
+		zuf_err("copy_from_user => %ld\n", cp_ret);
+		err = -EFAULT;
+		goto fail;
+	}
+
+	err = zuf_private_mount(zri, &zip->rfi, &zip->zmi, &zpmi->sb);
+	if (unlikely(err))
+		goto fail;
+
+	cp_ret = copy_to_user(parg, zip, hdr.in_len);
+	if (unlikely(cp_ret)) {
+		zuf_err("copy_to_user =>%ld\n", cp_ret);
+		err = -EFAULT;
+		goto fail;
+	}
+
+	file->private_data = &zpmi->zsf;
+
+out:
+	kfree(zip);
+	return err;
+
+fail:
+	kfree(zpmi);
+	goto out;
 }
 
 /* ~~~~ ZU_IOC_NUMA_MAP ~~~~ */
@@ -966,6 +1057,8 @@ long zufc_ioctl(struct file *file, unsigned int cmd, ulong arg)
 		return _zu_wait(file, parg);
 	case ZU_IOC_ALLOC_BUFFER:
 		return _zu_ebuff_alloc(file, parg);
+	case ZU_IOC_PRIVATE_MOUNT:
+		return _zu_private_mounter(file, parg);
 	case ZU_IOC_BREAK_ALL:
 		return _zu_break(file, parg);
 	default:
@@ -987,6 +1080,9 @@ int zufc_release(struct inode *inode, struct file *file)
 		return 0;
 	case zlfs_e_mout_thread:
 		zufc_mounter_release(file);
+		return 0;
+	case zlfs_e_private_mount:
+		_zu_private_mounter_release(file);
 		return 0;
 	case zlfs_e_pmem:
 		/* NOTHING to clean for pmem file yet */

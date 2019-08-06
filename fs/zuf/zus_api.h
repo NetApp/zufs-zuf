@@ -330,6 +330,17 @@ struct  zufs_ioc_mount {
 };
 #define ZU_IOC_MOUNT		_IOWR('Z', 11, struct zufs_ioc_mount)
 
+/* Mount locally with a zus-runner process */
+#define ZUFS_PMDEV_OPT "zpmdev"
+struct zufs_ioc_mount_private {
+	struct zufs_ioc_hdr	hdr;
+	__u32			mount_fd; /* kernel cookie */
+	__u32			is_umount; /* true or false */
+	struct register_fs_info	rfi;
+	struct zufs_mount_info	zmi; /* must be last */
+};
+#define ZU_IOC_PRIVATE_MOUNT	_IOWR('Z', 12, struct zufs_ioc_mount_private)
+
 /* pmem  */
 struct zufs_cpu_set {
 	ulong bits[16];
@@ -432,7 +443,31 @@ enum e_zufs_operation {
 	ZUFS_OP_NULL		= 0,
 	ZUFS_OP_BREAK		= 1,	/* Kernel telling Server to exit */
 
+	ZUFS_OP_STATFS		= 2,
+	ZUFS_OP_SHOW_OPTIONS	= 3,
+
 	ZUFS_OP_MAX_OPT,
+};
+
+#define ZUFS_MO_MAX	512
+
+struct zufs_ioc_mount_options {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_sb_info *zus_sbi;
+
+	/* OUT */
+	char	buf[0];
+};
+
+/* ZUFS_OP_STATFS */
+struct zufs_ioc_statfs {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_sb_info *zus_sbi;
+
+	/* OUT */
+	struct statfs64 statfs_out;
 };
 
 #endif /* _LINUX_ZUFS_API_H */
