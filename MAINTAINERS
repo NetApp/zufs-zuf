@@ -18038,6 +18038,12 @@ L:	linux-mm@kvack.org
 S:	Maintained
 F:	mm/zswap.c
 
+ZUFS ZERO COPY USER-MODE FILESYSTEM
+M:	Boaz Harrosh <boazh@netapp.com>
+L:	linux-fsdevel@vger.kernel.org
+S:	Maintained
+F:	fs/zuf/
+
 THE REST
 M:	Linus Torvalds <torvalds@linux-foundation.org>
 L:	linux-kernel@vger.kernel.org
