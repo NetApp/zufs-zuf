@@ -54,6 +54,9 @@ int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs);
 int zuf_init_inodecache(void);
 void zuf_destroy_inodecache(void);
 
+void zuf_sync_inc(struct inode *inode);
+void zuf_sync_dec(struct inode *inode, ulong write_unmapped);
+
 struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 			 const char *dev_name, void *data);
 
@@ -117,6 +120,9 @@ int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
 			 __u64 *iom_e_user, uint iom_n);
 int zuf_rw_file_range_compare(struct inode *i_in, loff_t pos_in,
 			      struct inode *i_out, loff_t pos_out, loff_t len);
+
+/* mmap.c */
+int zuf_file_mmap(struct file *file, struct vm_area_struct *vma);
 
 /* t1.c */
 int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);

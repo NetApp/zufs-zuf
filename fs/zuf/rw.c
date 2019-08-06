@@ -649,12 +649,29 @@ static int _fadv_willneed(struct super_block *sb, struct inode *inode,
 	return err;
 }
 
+static int _fadv_dontneed(struct super_block *sb, struct inode *inode,
+			  loff_t offset, loff_t len)
+{
+	struct zufs_ioc_sync ioc_range = {
+		.hdr.in_len = sizeof(ioc_range),
+		.hdr.operation = ZUFS_OP_SYNC,
+		.zus_ii = ZUII(inode)->zus_ii,
+		.offset = offset,
+		.length = len,
+		.flags = ZUFS_SF_DONTNEED,
+	};
+
+	return zufc_dispatch(ZUF_ROOT(SBI(sb)), &ioc_range.hdr, NULL, 0);
+}
+
 int zuf_rw_fadvise(struct super_block *sb, struct inode *inode,
 		   loff_t offset, loff_t len, int advise, bool rand)
 {
 	switch (advise) {
 	case POSIX_FADV_WILLNEED:
 		return _fadv_willneed(sb, inode, offset, len, rand);
+	case POSIX_FADV_DONTNEED:
+		return _fadv_dontneed(sb, inode, offset, len);
 	case POSIX_FADV_NOREUSE: /* TODO */
 	case POSIX_FADV_SEQUENTIAL: /* TODO: turn off random */
 	case POSIX_FADV_NORMAL:
