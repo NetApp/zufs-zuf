@@ -57,6 +57,13 @@ struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
 				   struct zus_sb_info *zus_sbi);
 
+int zuf_private_mount(struct zuf_root_info *zri, struct register_fs_info *rfi,
+		      struct zufs_mount_info *zmi, struct super_block **sb_out);
+int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb);
+
+/* inode.c */
+struct inode *zuf_iget(struct super_block *sb, struct zus_inode_info *zus_ii,
+		       zu_dpp_t _zi, bool *exist);
 /* t1.c */
 int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);
 
