@@ -106,12 +106,33 @@ struct zuf_pmem_file {
 	struct multi_devices *md;
 };
 
+/*
+ * Private Super-block flags
+ */
+enum {
+	ZUF_MOUNT_PEDANTIC	= 0x000001,	/* Check for memory leaks */
+	ZUF_MOUNT_PEDANTIC_SHADOW = 0x00002,	/* */
+	ZUF_MOUNT_SILENT	= 0x000004,	/* verbosity is silent */
+	ZUF_MOUNT_EPHEMERAL	= 0x000008,	/* Don't persist the data */
+	ZUF_MOUNT_FAILED	= 0x000010,	/* mark a failed-mount */
+	ZUF_MOUNT_DAX		= 0x000020,	/* mounted with dax option */
+	ZUF_MOUNT_POSIXACL	= 0x000040,	/* mounted with posix acls */
+	ZUF_MOUNT_PRIVATE	= 0x000080,	/* private mount from runner */
+};
+
+#define clear_opt(sbi, opt)       (sbi->s_mount_opt &= ~ZUF_MOUNT_ ## opt)
+#define set_opt(sbi, opt)         (sbi->s_mount_opt |= ZUF_MOUNT_ ## opt)
+#define test_opt(sbi, opt)      (sbi->s_mount_opt & ZUF_MOUNT_ ## opt)
 
 /*
  * ZUF per-inode data in memory
  */
 struct zuf_inode_info {
 	struct inode		vfs_inode;
+
+	/* cookies from Server */
+	struct zus_inode	*zi;
+	struct zus_inode_info	*zus_ii;
 };
 
 static inline struct zuf_inode_info *ZUII(struct inode *inode)
@@ -163,6 +184,119 @@ static inline bool zuf_rdonly(struct super_block *sb)
 {
 	return sb_rdonly(sb);
 }
+
+static inline bool zuf_is_nio_reads(struct inode *inode)
+{
+	return SBI(inode->i_sb)->fs_caps & ZUFS_FSC_NIO_READS;
+}
+
+static inline bool zuf_is_nio_writes(struct inode *inode)
+{
+	return SBI(inode->i_sb)->fs_caps & ZUFS_FSC_NIO_WRITES;
+}
+
+static inline struct zus_inode *zus_zi(struct inode *inode)
+{
+	return ZUII(inode)->zi;
+}
+
+/* An accessor because of the frequent use in prints */
+static inline ulong _zi_ino(struct zus_inode *zi)
+{
+	return le64_to_cpu(zi->i_ino);
+}
+
+static inline bool _zi_active(struct zus_inode *zi)
+{
+	return (zi->i_nlink || zi->i_mode);
+}
+
+static inline void mt_to_timespec(struct timespec64 *t, __le64 *mt)
+{
+	u32 nsec;
+
+	t->tv_sec = div_s64_rem(le64_to_cpu(*mt), NSEC_PER_SEC, &nsec);
+	t->tv_nsec = nsec;
+}
+
+static inline void timespec_to_mt(__le64 *mt, struct timespec64 *t)
+{
+	*mt = cpu_to_le64(t->tv_sec * NSEC_PER_SEC + t->tv_nsec);
+}
+
+static inline
+void zus_inode_cmtime_now(struct inode *inode, struct zus_inode *zi)
+{
+	inode->i_mtime = inode->i_ctime = current_time(inode);
+	timespec_to_mt(&zi->i_ctime, &inode->i_ctime);
+	zi->i_mtime = zi->i_ctime;
+}
+
+static inline
+void zus_inode_ctime_now(struct inode *inode, struct zus_inode *zi)
+{
+	inode->i_ctime = current_time(inode);
+	timespec_to_mt(&zi->i_ctime, &inode->i_ctime);
+}
+
+static inline void *zuf_dpp_t_addr(struct super_block *sb, zu_dpp_t v)
+{
+	/* TODO: Implement zufs_ioc_create_mempool already */
+	if (WARN_ON(zu_dpp_t_pool(v)))
+		return NULL;
+
+	return md_addr_verify(SBI(sb)->md, zu_dpp_t_val(v));
+}
+
+enum big_alloc_type { ba_stack, ba_8k, ba_vmalloc };
+#define S_8K (1024UL * 8)
+
+void *zuf_8k_alloc(gfp_t gfp);
+void  zuf_8k_free(void *ptr);
+
+static inline
+void *big_alloc(uint bytes, uint local_size, void *local, gfp_t gfp,
+		enum big_alloc_type *bat)
+{
+	void *ptr;
+
+	if (bytes <= local_size) {
+		*bat = ba_stack;
+		ptr = local;
+	} else if (bytes <= S_8K) {
+		*bat = ba_8k;
+		ptr = zuf_8k_alloc(gfp);
+	} else {
+		*bat = ba_vmalloc;
+		ptr = vmalloc(bytes);
+	}
+
+	return ptr;
+}
+
+static inline void big_free(void *ptr, enum big_alloc_type bat)
+{
+	if (unlikely(!ptr))
+		return;
+
+	switch (bat) {
+	case ba_stack:
+		break;
+	case ba_8k:
+		zuf_8k_free(ptr);
+		break;
+	case ba_vmalloc:
+		vfree(ptr);
+	}
+}
+
+#if (CONFIG_FRAME_WARN == 0)
+#	define ZUF_MAX_STACK(minus) (THREAD_SIZE / 2 - minus)
+#elif (CONFIG_FRAME_WARN < (S_8K + 8))
+#	define ZUF_MAX_STACK(minus) (CONFIG_FRAME_WARN - minus)
+#else
+#	define ZUF_MAX_STACK(minus) ((S_8K + 8) - minus)
+#endif
 
 struct zuf_dispatch_op;
 typedef int (*overflow_handler)(struct zuf_dispatch_op *zdo, void *parg,

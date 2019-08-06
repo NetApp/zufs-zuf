@@ -408,6 +408,10 @@ int __init zuf_root_init(void)
 	if (unlikely(err))
 		return err;
 
+	err = zuf_8k_cache_init();
+	if (unlikely(err))
+		return err;
+
 	zufr_kset = kset_create_and_add("zuf", NULL, fs_kobj);
 	if (!zufr_kset) {
 		err = -ENOMEM;
@@ -431,6 +435,7 @@ static void __exit zuf_root_exit(void)
 {
 	unregister_filesystem(&zufr_type);
 	kset_unregister(zufr_kset);
+	zuf_8k_cache_fini();
 	zuf_destroy_inodecache();
 }
 
