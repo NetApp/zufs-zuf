@@ -510,7 +510,8 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 	}
 	io_gb.IO.rw = rw;
 
-	size = min_t(ssize_t, ZUS_API_MAP_MAX_SIZE, iov_iter_count(ii));
+	size = min_t(ssize_t, ZUS_API_MAP_MAX_SIZE - offset,
+		     iov_iter_count(ii));
 	err = _zufs_IO_get_multy(sbi, inode, pos, size, &io_gb);
 	if (unlikely(err))
 		return err;
