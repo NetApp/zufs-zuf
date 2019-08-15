@@ -29,7 +29,7 @@ static int zuf_readdir(struct file *file, struct dir_context *ctx)
 		.dir_ii = ZUII(inode)->zus_ii,
 	};
 	struct zufs_readdir_iter rdi;
-	struct page *pages[ZUS_API_MAP_MAX_PAGES];
+	struct page **pages;
 	struct zufs_dir_entry *zde;
 	void *addr, *__a;
 	uint nump, i;
@@ -45,12 +45,16 @@ static int zuf_readdir(struct file *file, struct dir_context *ctx)
 		ioc_readdir.hdr.len = min_t(loff_t, i_size - ctx->pos,
 					    ZUS_API_MAP_MAX_SIZE);
 	nump = md_o2p_up(ioc_readdir.hdr.len);
-	addr = vzalloc(md_p2o(nump));
+	/* Allocating both readdir buffer and the pages-array.
+	 * Pages array is at end
+	 */
+	addr = vzalloc(md_p2o(nump) + nump * sizeof(*pages));
 	if (unlikely(!addr))
 		return -ENOMEM;
 
 	WARN_ON((ulong)addr & (PAGE_SIZE - 1));
 
+	pages = addr + md_p2o(nump);
 	__a = addr;
 	for (i = 0; i < nump; ++i) {
 		pages[i] = vmalloc_to_page(__a);
