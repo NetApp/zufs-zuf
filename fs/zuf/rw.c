@@ -427,6 +427,14 @@ int _zufs_IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode,
 		if (!io_gb->IO.ziom.iom_n) {
 			zuf_err("WANT tO SEE => %d\n", err);
 			return err;
+		} else {
+			ulong offset = pos & (PAGE_SIZE - 1);
+
+			if (md_o2p_up(offset + len) < io_gb->IO.ziom.iom_n) {
+				zuf_err("Unexpected num of iom_n=%d pos=0x%llx len=0x%lx\n",
+					io_gb->IO.ziom.iom_n, pos, len);
+				return -EIO;
+			}
 		}
 
 		_extract_gb_multy_bns(io_gb, &io_gb->IO);
