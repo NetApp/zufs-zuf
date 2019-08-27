@@ -1659,6 +1659,9 @@ static vm_fault_t zuf_ebuff_fault(struct vm_fault *vmf)
 	zuf_dbg_core("start=0x%lx end=0x%lx file-start=0x%lx file-off=0x%lx\n",
 		     vma->vm_start, vma->vm_end, vma->vm_pgoff, offset);
 
+	if (unlikely(!ebuff))
+		return VM_FAULT_SIGBUS;
+
 	/* if Server overruns its buffer crash it dead */
 	if (unlikely((offset < 0) || (ebuff->alloc_size < offset))) {
 		zuf_err("start=0x%lx end=0x%lx file-start=0x%lx file-off=0x%lx\n",
@@ -1688,6 +1691,9 @@ static const struct vm_operations_struct zuf_ebuff_ops = {
 static int zufc_ebuff_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct zu_exec_buff *ebuff = _ebuff_from_file(vma->vm_file);
+
+	if (unlikely(!ebuff))
+		return -EINVAL;
 
 	vma->vm_flags |= VM_PFNMAP;
 	vma->vm_ops = &zuf_ebuff_ops;
