@@ -791,7 +791,7 @@ static int zuf_fadvise(struct file *file, loff_t offset, loff_t len,
 
 	zuf_r_lock(zii);
 
-	err = zuf_rw_fadvise(inode->i_sb, inode, offset, len, advise,
+	err = zuf_rw_fadvise(inode->i_sb, file, offset, len, advise,
 			     file->f_mode & FMODE_RANDOM);
 
 	zuf_r_unlock(zii);

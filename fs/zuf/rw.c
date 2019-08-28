@@ -665,19 +665,57 @@ static int _fadv_dontneed(struct super_block *sb, struct inode *inode,
 	return zufc_dispatch(ZUF_ROOT(SBI(sb)), &ioc_range.hdr, NULL, 0);
 }
 
-int zuf_rw_fadvise(struct super_block *sb, struct inode *inode,
+/* FIXME: There is a pending patch from Jan Karta to export generic_fadvise.
+ * until then duplicate here what we need
+ */
+#include <linux/backing-dev.h>
+
+static int _generic_fadvise(struct file *file, loff_t offset, loff_t len,
+			    int advise)
+{
+	struct backing_dev_info *bdi = inode_to_bdi(file_inode(file));
+
+	switch (advise) {
+	case POSIX_FADV_NORMAL:
+		file->f_ra.ra_pages = bdi->ra_pages;
+		spin_lock(&file->f_lock);
+		file->f_mode &= ~FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
+		break;
+	case POSIX_FADV_RANDOM:
+		spin_lock(&file->f_lock);
+		file->f_mode |= FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
+		break;
+	case POSIX_FADV_SEQUENTIAL:
+		file->f_ra.ra_pages = bdi->ra_pages * 2;
+		spin_lock(&file->f_lock);
+		file->f_mode &= ~FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
+		break;
+	case POSIX_FADV_NOREUSE:
+		break;
+	}
+
+	return 0;
+}
+
+int zuf_rw_fadvise(struct super_block *sb, struct file *file,
 		   loff_t offset, loff_t len, int advise, bool rand)
 {
 	switch (advise) {
 	case POSIX_FADV_WILLNEED:
-		return _fadv_willneed(sb, inode, offset, len, rand);
+		return _fadv_willneed(sb, file_inode(file), offset, len, rand);
 	case POSIX_FADV_DONTNEED:
-		return _fadv_dontneed(sb, inode, offset, len);
-	case POSIX_FADV_NOREUSE: /* TODO */
-	case POSIX_FADV_SEQUENTIAL: /* TODO: turn off random */
+		return _fadv_dontneed(sb, file_inode(file), offset, len);
+
+	case POSIX_FADV_SEQUENTIAL:
 	case POSIX_FADV_NORMAL:
-		return 0;
+	case POSIX_FADV_RANDOM:
+	case POSIX_FADV_NOREUSE:
+		return _generic_fadvise(file, offset, len, advise);
 	default:
+		zuf_warn("Unknown advise %d\n", advise);
 		return -EINVAL;
 	}
 	return -EINVAL;
