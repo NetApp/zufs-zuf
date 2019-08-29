@@ -503,7 +503,7 @@ static void _lock_two_ziis(struct zuf_inode_info *zii1,
 			   struct zuf_inode_info *zii2)
 {
 	if (zii1 > zii2)
-		swap(zii2, zii2);
+		swap(zii1, zii2);
 
 	zuf_w_lock(zii1);
 	if (zii1 != zii2)
@@ -514,7 +514,7 @@ static void _unlock_two_ziis(struct zuf_inode_info *zii1,
 		      struct zuf_inode_info *zii2)
 {
 	if (zii1 > zii2)
-		swap(zii2, zii2);
+		swap(zii1, zii2);
 
 	if (zii1 != zii2)
 		zuf_w_unlock(zii2);
