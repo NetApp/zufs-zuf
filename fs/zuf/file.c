@@ -677,7 +677,7 @@ static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 		/* un-aligned len, see if it is beyond EOF */
 		if ((src_size > pos_in  + len) ||
 		    (dst_size > pos_out + len)) {
-			zuf_err("[%ld][%ld] Not aligned len=0x%llx pos_in=0x%llx "
+			zuf_dbg_err("[%ld][%ld] Not aligned len=0x%llx pos_in=0x%llx "
 				"pos_out=0x%llx src-size=0x%lx dst-size=0x%lx\n",
 				src_inode->i_ino, dst_inode->i_ino, len,
 				pos_in, pos_out, src_size, dst_size);
