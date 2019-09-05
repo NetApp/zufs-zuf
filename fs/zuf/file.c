@@ -547,7 +547,7 @@ static int _clone_file_range(struct inode *src_inode, loff_t pos_in,
 	unmap_mapping_range(src_inode->i_mapping, pos_in,  len, 0);
 	unmap_mapping_range(dst_inode->i_mapping, pos_out, len, 0);
 
-	zufc_goose_all_zts(ZUF_ROOT(SBI(dst_inode->i_sb)), NULL);
+	zufc_goose_all_zts(ZUF_ROOT(SBI(dst_inode->i_sb)), dst_inode);
 
 	if ((len_up == 0) && (pos_in || pos_out)) {
 		zuf_err("Boaz Smoking 0x%llx 0x%llx 0x%llx\n",

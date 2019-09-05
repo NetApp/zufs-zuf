@@ -770,7 +770,7 @@ static void _goose_one(void *info)
 		if (!zt->pigi_put->s || zt->pigi_put->needs_goosing)
 			return; /* this cpu is goose empty */
 
-		if (gw->inode && !_zt_pigi_has_inode(zt->pigi_put, gw->inode))
+		if (!_zt_pigi_has_inode(zt->pigi_put, gw->inode))
 			return;
 		if (!zt->zdo)
 			break;
@@ -784,17 +784,16 @@ static void _goose_one(void *info)
 		relay_fss_wakeup(&zt->relay);
 }
 
-/* if @inode ! zero only goose ZTs with that inode */
+/* NOTE: @inode must not be NULL */
 void zufc_goose_all_zts(struct zuf_root_info *zri, struct inode *inode)
 {
 	struct _goose_waiter gw;
 
-	if (inode && (!S_ISREG(inode->i_mode) ||
-	    !(inode->i_size || inode->i_blocks)))
+	if (!S_ISREG(inode->i_mode) || !(inode->i_size || inode->i_blocks))
 		return;
 
 	/* No point in two goosers fighting we are goosing for everyone
-	 * This also protects that only one zt->pigi_put->waiter at a time
+	 * This protects that only one zt->pigi_put->waiter at a time
 	 */
 	mutex_lock(&zri->sbl_lock);
 
@@ -802,13 +801,14 @@ void zufc_goose_all_zts(struct zuf_root_info *zri, struct inode *inode)
 	kref_init(&gw.kref);
 	gw.inode = (ulong)inode;
 
-	smp_call_function(_goose_one, &gw, true);
+	on_each_cpu(_goose_one, &gw, true);
 
 	if (kref_read(&gw.kref) == 1)
 		goto out;
 
 	_goose_put(&gw); /* put kref_init's 1 */
 	_goose_wait(&gw);
+
 out:
 	mutex_unlock(&zri->sbl_lock);
 }
@@ -1015,6 +1015,7 @@ static bool _need_channel_lock(struct zufc_thread *zt)
 static int _zu_wait(struct file *file, void *parg)
 {
 	struct zufc_thread *zt;
+	struct zufs_ioc_hdr *user_hdr;
 	bool __chan_is_locked = false;
 	int err;
 
@@ -1035,6 +1036,10 @@ static int _zu_wait(struct file *file, void *parg)
 		err = -EINVAL;
 		goto err;
 	}
+
+	user_hdr = zt->opt_buff;
+	if (user_hdr->flags & ZUFS_H_HAS_PIGY_PUT)
+		user_hdr->flags &= ~ZUFS_H_HAS_PIGY_PUT;
 
 	if (relay_is_app_waiting(&zt->relay)) {
 		if (unlikely(!zt->zdo)) {

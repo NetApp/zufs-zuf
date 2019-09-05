@@ -272,8 +272,6 @@ void zuf_evict_inode(struct inode *inode)
 	struct zuf_inode_info *zii = ZUII(inode);
 	int write_mapped;
 
-	zufc_goose_all_zts(ZUF_ROOT(SBI(sb)), inode);
-
 	if (!inode->i_nlink) {
 		if (unlikely(!zii->zi)) {
 			zuf_dbg_err("[%ld] inode without zi mode=0x%x size=0x%llx\n",
@@ -290,6 +288,8 @@ void zuf_evict_inode(struct inode *inode)
 		zuf_w_lock(zii);
 		zuf_xaw_lock(zii); /* Needed? probably not but palying safe */
 
+		zufc_goose_all_zts(ZUF_ROOT(SBI(sb)), inode);
+
 		zuf_evict_dispatch(sb, zii->zus_ii, ZUFS_OP_FREE_INODE, 0);
 
 		inode->i_mtime = inode->i_ctime = current_time(inode);
@@ -301,6 +301,8 @@ void zuf_evict_inode(struct inode *inode)
 		zuf_dbg_vfs("[%ld] inode is going down?\n", inode->i_ino);
 
 		zuf_smw_lock(zii);
+
+		zufc_goose_all_zts(ZUF_ROOT(SBI(sb)), inode);
 
 		zuf_evict_dispatch(sb, zii->zus_ii, ZUFS_OP_EVICT_INODE, 0);
 
