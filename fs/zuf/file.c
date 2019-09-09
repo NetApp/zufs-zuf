@@ -51,6 +51,10 @@ long __zuf_fallocate(struct inode *inode, int mode, loff_t offset, loff_t len)
 	}
 
 	if (mode & FALLOC_FL_PUNCH_HOLE) {
+		if (offset >= i_size)
+			return 0;
+		if (offset + len > i_size)
+			len = i_size - offset;
 		need_len_check = false;
 		need_unmap = true;
 		unmap_len = len;
@@ -59,6 +63,8 @@ long __zuf_fallocate(struct inode *inode, int mode, loff_t offset, loff_t len)
 		new_size = offset;
 		need_unmap = true;
 	} else if (mode & FALLOC_FL_COLLAPSE_RANGE) {
+		if (offset + len > i_size)
+			return -EINVAL;
 		need_len_check = false;
 		need_unmap = true;
 	} else if (mode & FALLOC_FL_INSERT_RANGE) {
