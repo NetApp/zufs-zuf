@@ -36,10 +36,6 @@
 #define	__aligned(x)			__attribute__((aligned(x)))
 #endif
 
-#ifndef __packed
-#	define __packed __attribute__((packed))
-#endif
-
 #endif /*  ndef __KERNEL__ */
 
 #define MDT_SIZE 4096
@@ -50,7 +46,7 @@
 struct md_dev_id {
 	uuid_le	uuid;
 	__le64	blocks;
-} __packed;
+} __aligned(8);
 
 static inline __u64 __dev_id_blocks(struct md_dev_id *dev)
 {

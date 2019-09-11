@@ -71,10 +71,6 @@
 #define PAGE_SHIFT     12
 #define PAGE_SIZE      (1 << PAGE_SHIFT)
 
-#ifndef __packed
-#	define __packed __attribute__((packed))
-#endif
-
 #ifndef ALIGN
 #define ALIGN(x, a)		ALIGN_MASK(x, (typeof(x))(a) - 1)
 #define ALIGN_MASK(x, mask)	(((x) + (mask)) & ~(mask))
@@ -769,7 +765,7 @@ struct zufs_ioc_xattr {
 	/* OUT */
 	__u32	user_buf_size;
 	char	buf[0];
-} __packed;
+};
 
 
 /* ZUFS_OP_FIEMAP */
@@ -787,7 +783,7 @@ struct zufs_ioc_fiemap {
 	__u32	extents_mapped;
 	__u32	pad;
 
-} __packed;
+};
 
 struct zufs_fiemap_extent_info {
 	struct fiemap_extent *fi_extents_start;
@@ -918,7 +914,7 @@ struct zufs_iom_t2_io {
 struct zufs_iom_t2_io_len {
 	struct zufs_iom_t2_io iom;
 	__u64 num_pages;
-} __packed;
+};
 
 /* IOM_T2_ZUSMEM_WRITE / IOM_T2_ZUSMEM_READ */
 struct zufs_iom_t2_zusmem_io {
@@ -938,7 +934,7 @@ struct zufs_iom_unmap {
 	__u64	unmap_index;	/* Offset in pages of inode */
 	__u64	unmap_n;	/* Num pages to unmap (0 means: to eof) */
 	__u64	ino;		/* Pages of this inode */
-} __packed;
+};
 
 #define ZUFS_WRITE_OP_SPACE						\
 	((sizeof(struct zufs_iom_unmap) +				\
