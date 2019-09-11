@@ -287,7 +287,6 @@ void zuf_evict_inode(struct inode *inode)
 			_warn_inode_dirty(inode, zii->zi);
 
 		zuf_w_lock(zii);
-		zuf_xaw_lock(zii); /* Needed? probably not but palying safe */
 
 		zufc_goose_all_zts(ZUF_ROOT(SBI(sb)), inode);
 
@@ -295,8 +294,6 @@ void zuf_evict_inode(struct inode *inode)
 
 		inode->i_mtime = inode->i_ctime = current_time(inode);
 		inode->i_size = 0;
-
-		zuf_xaw_unlock(zii);
 		zuf_w_unlock(zii);
 	} else {
 		zuf_dbg_vfs("[%ld] inode is going down?\n", inode->i_ino);
