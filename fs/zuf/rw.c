@@ -302,16 +302,28 @@ static ssize_t _iov_iter_get_pages_any(struct iov_iter *ii,
 }
 
 static ssize_t _zufs_IO(struct zuf_sb_info *sbi, struct inode *inode,
+			void *on_stack, uint max_on_stack,
 			struct iov_iter *ii, struct kiocb *kiocb,
 			struct file_ra_state *ra, int operation, uint rw)
 {
 	int err = 0;
 	loff_t start_pos = kiocb->ki_pos;
 	loff_t pos = start_pos;
+	enum big_alloc_type bat;
+	struct page **pages;
+	uint max_pages = min_t(uint,
+			md_o2p_up(iov_iter_count(ii) + (pos & ~PAGE_MASK)),
+			ZUS_API_MAP_MAX_PAGES);
+
+	pages = big_alloc(max_pages * sizeof(*pages), max_on_stack, on_stack,
+			  GFP_NOFS, &bat);
+	if (unlikely(!pages)){
+		zuf_err("Sigh on stack is best max_pages=%d\n", max_pages);
+		return -ENOMEM;
+	};
 
 	while (iov_iter_count(ii)) {
 		struct zufs_ioc_IO io = {};
-		struct page *pages[ZUS_API_MAP_MAX_PAGES];
 		uint nump;
 		ssize_t bytes;
 		size_t pgoffset;
@@ -362,6 +374,8 @@ static ssize_t _zufs_IO(struct zuf_sb_info *sbi, struct inode *inode,
 		if (unlikely(err))
 			break;
 	}
+
+	big_free(pages, bat);
 
 	if (unlikely(pos == start_pos))
 		return err;
@@ -492,19 +506,19 @@ static inline int _write_one(struct zuf_sb_info *sbi, struct iov_iter *ii,
 }
 
 static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
+			    ulong *bns, uint max_bns,
 			    struct iov_iter *ii, struct file_ra_state *ra,
 			    loff_t start, uint rw)
 {
 	loff_t pos = start;
 	uint offset = pos & (PAGE_SIZE - 1);
-	ulong bns[ZUS_API_MAP_MAX_PAGES];
 	struct _io_gb_multy io_gb = { .bns = bns, };
 	ssize_t size;
 	int err;
 	uint i;
 
 	if (ra) {
-		io_gb.IO.ra.start		= ra->start;
+		io_gb.IO.ra.start	= ra->start;
 		io_gb.IO.ra.ra_pages	= ra->ra_pages;
 		io_gb.IO.ra.prev_pos	= ra->prev_pos;
 	}
@@ -570,14 +584,29 @@ out:
 }
 
 static ssize_t _IO_gm(struct zuf_sb_info *sbi, struct inode *inode,
-			struct iov_iter *ii, struct kiocb *kiocb,
-			struct file_ra_state *ra, uint rw)
+		      ulong *on_stack, uint max_on_stack,
+		      struct iov_iter *ii, struct kiocb *kiocb,
+		      struct file_ra_state *ra, uint rw)
 {
 	ssize_t size = 0;
 	ssize_t ret = 0;
+	enum big_alloc_type bat;
+	ulong *bns;
+	uint max_bns = min_t(uint,
+		md_o2p_up(iov_iter_count(ii) + (kiocb->ki_pos & ~PAGE_MASK)),
+		ZUS_API_MAP_MAX_PAGES);
+
+	bns = big_alloc(max_bns * sizeof(ulong), max_on_stack, on_stack,
+			GFP_NOFS, &bat);
+	if (unlikely(!bns)) {
+		zuf_err("life was more simple on the stack max_bns=%d\n",
+			max_bns);
+		return -ENOMEM;
+	}
 
 	while (iov_iter_count(ii)) {
-		ret = _IO_gm_inner(sbi, inode, ii, ra, kiocb->ki_pos, rw);
+		ret = _IO_gm_inner(sbi, inode, bns, max_bns, ii, ra,
+				   kiocb->ki_pos, rw);
 		if (unlikely(ret < 0))
 			break;
 
@@ -585,12 +614,15 @@ static ssize_t _IO_gm(struct zuf_sb_info *sbi, struct inode *inode,
 		size += ret;
 	}
 
+	big_free(bns, bat);
+
 	return size ?: ret;
 }
 
 ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
 			 struct kiocb *kiocb, struct iov_iter *ii)
 {
+	long on_stack[ZUF_MAX_STACK(8) / sizeof(long)];
 	ulong rw = READ | rand_tag(kiocb);
 
 	/* EOF protection */
@@ -605,15 +637,17 @@ ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
 	}
 
 	if (zuf_is_nio_reads(inode))
-		return _IO_gm(SBI(sb), inode, ii, kiocb, kiocb_ra(kiocb), rw);
+		return _IO_gm(SBI(sb), inode, on_stack, sizeof(on_stack),
+			      ii, kiocb, kiocb_ra(kiocb), rw);
 
-	return _zufs_IO(SBI(sb), inode, ii, kiocb, kiocb_ra(kiocb),
-			ZUFS_OP_READ, rw);
+	return _zufs_IO(SBI(sb), inode, on_stack, sizeof(on_stack), ii,
+			kiocb, kiocb_ra(kiocb), ZUFS_OP_READ, rw);
 }
 
 ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
 			  struct kiocb *kiocb, struct iov_iter *ii)
 {
+	long on_stack[ZUF_MAX_STACK(8) / sizeof(long)];
 	ulong rw = WRITE;
 
 	if (kiocb->ki_filp->f_flags & O_DSYNC ||
@@ -623,10 +657,11 @@ ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
 		rw |= ZUFS_RW_DIRECT;
 
 	if (zuf_is_nio_writes(inode))
-		return _IO_gm(SBI(sb), inode, ii, kiocb, kiocb_ra(kiocb), rw);
+		return _IO_gm(SBI(sb), inode, on_stack, sizeof(on_stack),
+			      ii, kiocb, kiocb_ra(kiocb), rw);
 
-	return _zufs_IO(SBI(sb), inode, ii, kiocb, kiocb_ra(kiocb),
-			ZUFS_OP_WRITE, rw);
+	return _zufs_IO(SBI(sb), inode, on_stack, sizeof(on_stack),
+			ii, kiocb, kiocb_ra(kiocb), ZUFS_OP_WRITE, rw);
 }
 
 static int _fadv_willneed(struct super_block *sb, struct inode *inode,

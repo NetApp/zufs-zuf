@@ -21,14 +21,10 @@
 #define ZUFS_SUPPORTED_FS_FLAGS (FS_SYNC_FL | FS_APPEND_FL | FS_IMMUTABLE_FL | \
 				 FS_NOATIME_FL | FS_DIRTY_FL)
 
-#define ZUS_IOCTL_MAX_PAGES	8
-
-static int _ioctl_dispatch(struct inode *inode, uint cmd, ulong arg)
+noinline
+static int _ioctl_dispatch(struct inode *inode, uint cmd, ulong arg,
+			   void *on_stack, uint max_stack)
 {
-	struct _ioctl_info {
-		struct zufs_ioc_ioctl ctl;
-		char buf[900];
-	} ctl_alloc = {};
 	enum big_alloc_type bat;
 	struct zufs_ioc_ioctl *ioc_ioctl;
 	size_t ioc_size = _IOC_SIZE(cmd);
@@ -46,8 +42,7 @@ realloc:
 		    inode->i_ino, cmd, arg, size, capable(CAP_SYS_ADMIN),
 		    _IOC_TYPE(cmd), _IOC_NR(cmd), ioc_size);
 
-	ioc_ioctl = big_alloc(size, sizeof(ctl_alloc), &ctl_alloc, GFP_KERNEL,
-			      &bat);
+	ioc_ioctl = big_alloc(size, max_stack, on_stack, GFP_KERNEL, &bat);
 	if (unlikely(!ioc_ioctl))
 		return -ENOMEM;
 
@@ -271,20 +266,21 @@ static int _ioc_setversion(struct inode *inode, uint __user *parg)
 
 long zuf_ioctl(struct file *filp, unsigned int cmd, ulong arg)
 {
-	struct inode *inode = filp->f_inode;
 	void __user *parg = (void __user *)arg;
+	char on_stack[ZUF_MAX_STACK(8)];
 
 	switch (cmd) {
 	case FS_IOC_GETFLAGS:
-		return _ioc_getflags(inode, parg);
+		return _ioc_getflags(filp->f_inode, parg);
 	case FS_IOC_SETFLAGS:
-		return _ioc_setflags(inode, parg);
+		return _ioc_setflags(filp->f_inode, parg);
 	case FS_IOC_GETVERSION:
-		return put_user(inode->i_generation, (int __user *)arg);
+		return put_user(filp->f_inode->i_generation, (int __user *)arg);
 	case FS_IOC_SETVERSION:
-		return _ioc_setversion(inode, parg);
+		return _ioc_setversion(filp->f_inode, parg);
 	default:
-		return _ioctl_dispatch(inode, cmd, arg);
+		return _ioctl_dispatch(filp->f_inode, cmd, arg, on_stack,
+				       sizeof(on_stack));
 	}
 }
 

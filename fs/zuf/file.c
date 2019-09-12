@@ -255,7 +255,9 @@ static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		.length = length,
 		.flags = fieinfo->fi_flags,
 	};
-	struct page *pages[ZUS_API_MAP_MAX_PAGES];
+	long on_stack[ZUF_MAX_STACK(160) / sizeof(long)];
+	struct page **pages = NULL;
+	enum big_alloc_type bat = 0;
 	uint nump = 0, extents_max = 0;
 	int i, err;
 
@@ -278,14 +280,8 @@ static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		uint nump_r;
 
 		nump = md_o2p_up(offset + len);
-		if (ARRAY_SIZE(pages) < nump) {
-			nump = ARRAY_SIZE(pages);
-			end_offset = 0;
-		}
-
-		nump_r = get_user_pages_fast(start, nump, WRITE, pages);
-		if (unlikely(nump != nump_r))
-			return -EFAULT;
+		if (ZUS_API_MAP_MAX_PAGES < nump)
+			nump = ZUS_API_MAP_MAX_PAGES;
 
 		__len = nump * PAGE_SIZE - offset;
 		if (end_offset)
@@ -295,6 +291,17 @@ static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 
 		ioc_fiemap.hdr.len = extents_max * sizeof(struct fiemap_extent);
 		ioc_fiemap.hdr.offset = offset;
+
+		pages = big_alloc(nump * sizeof(*pages), sizeof(on_stack),
+				  on_stack, GFP_KERNEL, &bat);
+		if (unlikely(!pages))
+			return -ENOMEM;
+
+		nump_r = get_user_pages_fast(start, nump, WRITE, pages);
+		if (unlikely(nump != nump_r)) {
+			err = -EFAULT;
+			goto free;
+		}
 	}
 	ioc_fiemap.extents_max = extents_max;
 
@@ -319,6 +326,8 @@ out:
 
 	for (i = 0; i < nump; ++i)
 		put_page(pages[i]);
+free:
+	big_free(pages, bat);
 
 	return err;
 }

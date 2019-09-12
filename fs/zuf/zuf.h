@@ -349,7 +349,11 @@ struct zuf_acl {
 	__le32	id;
 } __packed;
 
-enum big_alloc_type { ba_stack, ba_kmalloc, ba_vmalloc };
+enum big_alloc_type { ba_stack, ba_8k, ba_vmalloc };
+#define S_8K (1024UL * 8)
+
+void *zuf_8k_alloc(gfp_t gfp);
+void  zuf_8k_free(void *ptr);
 
 static inline
 void *big_alloc(uint bytes, uint local_size, void *local, gfp_t gfp,
@@ -360,9 +364,9 @@ void *big_alloc(uint bytes, uint local_size, void *local, gfp_t gfp,
 	if (bytes <= local_size) {
 		*bat = ba_stack;
 		ptr = local;
-	} else if (bytes <= PAGE_SIZE) {
-		*bat = ba_kmalloc;
-		ptr = kmalloc(bytes, gfp);
+	} else if (bytes <= S_8K) {
+		*bat = ba_8k;
+		ptr = zuf_8k_alloc(gfp);
 	} else {
 		*bat = ba_vmalloc;
 		ptr = vmalloc(bytes);
@@ -373,16 +377,27 @@ void *big_alloc(uint bytes, uint local_size, void *local, gfp_t gfp,
 
 static inline void big_free(void *ptr, enum big_alloc_type bat)
 {
+	if (unlikely(!ptr))
+		return;
+
 	switch (bat) {
 	case ba_stack:
 		break;
-	case ba_kmalloc:
-		kfree(ptr);
+	case ba_8k:
+		zuf_8k_free(ptr);
 		break;
 	case ba_vmalloc:
 		vfree(ptr);
 	}
 }
+
+#if (CONFIG_FRAME_WARN == 0)
+#	define ZUF_MAX_STACK(minus) (THREAD_SIZE / 2 - minus)
+#elif (CONFIG_FRAME_WARN < (S_8K + 8))
+#	define ZUF_MAX_STACK(minus) (CONFIG_FRAME_WARN - minus)
+#else
+#	define ZUF_MAX_STACK(minus) ((S_8K + 8) - minus)
+#endif
 
 struct zuf_dispatch_op;
 typedef int (*overflow_handler)(struct zuf_dispatch_op *zdo, void *parg,
