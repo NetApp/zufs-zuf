@@ -72,8 +72,6 @@ int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb);
 
 /* file.c */
 int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync);
-ssize_t zuf_write_iter(struct kiocb *kiocb, struct iov_iter *ii);
-ssize_t zuf_read_iter(struct kiocb *kiocb, struct iov_iter *ii);
 long __zuf_fallocate(struct inode *inode, int mode, loff_t offset, loff_t len);
 
 /* namei.c */

@@ -24,9 +24,6 @@
 #include <linux/posix_acl_xattr.h>
 #include <linux/security.h>
 #include <linux/delay.h>
-#include <linux/falloc.h>
-#include <linux/swap.h>
-#include <linux/uio.h>
 #include "zuf.h"
 
 /* Flags that should be inherited by new inodes from their parent. */
@@ -617,78 +614,14 @@ void zuf_set_inode_flags(struct inode *inode, struct zus_inode *zi)
 		inode_has_no_xattr(inode);
 }
 
-static int zuf_swap_activate(struct swap_info_struct *sis, struct file *file,
-			     sector_t *span)
-{
-	struct inode *inode = file->f_inode;
-	int err = 0;
-
-	zuf_dbg_vfs("[%ld] swap_file num_pages(0x%x)\n",
-		    inode->i_ino, sis->pages+1);
-
-	/* FIXME: Before swap_activate swapon code reads a page
-	 * through the page cache. So we clean it here. Need to submit
-	 * a patch for reading swap header through read_iter or direct_IO
-	 */
-	if (unlikely(file->f_mapping->nrpages)) {
-		zuf_dbg_err("Yes (%ld) swap=%d\n",
-			 file->f_mapping->nrpages, IS_SWAPFILE(inode));
-		truncate_inode_pages_range(file->f_mapping, 0,
-					file->f_mapping->nrpages << PAGE_SHIFT);
-	}
-
-	/* TODO: Call the FS to ask if the file is shared (cloned). This is not
-	 * allowed
-	 */
-	if (md_p2o(inode->i_blocks) != inode->i_size)
-		return -EINVAL; /* file has holes */
-
-	/* return 0-extents which means come read/write through
-	 * zuf_direct_IO.
-	 */
-	return err;
-}
-
-static void zuf_swap_deactivate(struct file *file)
-{
-	/* TODO: Do we need to turn something off */
-	zuf_dbg_vfs("\n");
-}
-
-/* zuf_readpage is called once from swap_activate to read the swap header
- * other-wise zuf does not support any kind of page-cache yet
+/* direct_IO is not called. We set an empty one so open(O_DIRECT) will be happy
  */
-static int zuf_readpage(struct file *file, struct page *page)
-{
-	struct inode *inode = file->f_inode;
-	struct zuf_sb_info *sbi = SBI(inode->i_sb);
-	int err;
-
-	err = zuf_rw_read_page(sbi, inode, page, md_p2o(page->index));
-	SetPageUptodate(page);
-	unlock_page(page);
-
-	zuf_dbg_vfs("[%ld] page-index(0x%lx)\n", inode->i_ino, page->index);
-	return err;
-}
-
-/* direct_IO is only ever called for swapping */
 static ssize_t zuf_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 {
-	struct inode *inode = iocb->ki_filp->f_inode;
-
-	if (WARN_ON(!IS_SWAPFILE(inode)))
-		return -EINVAL;
-
-	zuf_dbg_vfs("[%ld] swapping(0x%llx)\n", inode->i_ino, iocb->ki_pos);
-	if (iov_iter_rw(iter) == READ)
-		return zuf_read_iter(iocb, iter);
-	return zuf_write_iter(iocb, iter);
+	WARN_ON(1);
+	return 0;
 }
 
 const struct address_space_operations zuf_aops = {
-	.swap_activate		= zuf_swap_activate,
-	.swap_deactivate	= zuf_swap_deactivate,
-	.readpage		= zuf_readpage, /* for swapping */
 	.direct_IO		= zuf_direct_IO,
 };

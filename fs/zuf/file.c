@@ -703,26 +703,15 @@ static ssize_t zuf_copy_file_range(struct file *file_in, loff_t pos_in,
 /* ZUFS:
  * make sure we clean up the resources consumed by zufs_init()
  */
-static int zuf_file_release(struct inode *inode, struct file *file)
+static int zuf_file_release(struct inode *inode, struct file *filp)
 {
-	if (unlikely(file->private_data))
+	if (unlikely(filp->private_data))
 		zuf_err("not yet\n");
-
-	/* FIXME: swapon code reads its header through the page cache.
-	 * So we clean it here. Need to submit a patch for reading swap
-	 * header through read_iter or direct_IO
-	 */
-	if (unlikely(file->f_mapping->nrpages)) {
-		zuf_dbg_err("Yes (%ld) swap=%d\n",
-			 file->f_mapping->nrpages, IS_SWAPFILE(inode));
-		truncate_inode_pages_range(file->f_mapping, 0,
-					file->f_mapping->nrpages << PAGE_SHIFT);
-	}
 
 	return 0;
 }
 
-ssize_t zuf_read_iter(struct kiocb *kiocb, struct iov_iter *ii)
+static ssize_t zuf_read_iter(struct kiocb *kiocb, struct iov_iter *ii)
 {
 	struct inode *inode = file_inode(kiocb->ki_filp);
 	struct zuf_inode_info *zii = ZUII(inode);
@@ -743,7 +732,7 @@ ssize_t zuf_read_iter(struct kiocb *kiocb, struct iov_iter *ii)
 	return ret;
 }
 
-ssize_t zuf_write_iter(struct kiocb *kiocb, struct iov_iter *ii)
+static ssize_t zuf_write_iter(struct kiocb *kiocb, struct iov_iter *ii)
 {
 	struct inode *inode = file_inode(kiocb->ki_filp);
 	struct zuf_inode_info *zii = ZUII(inode);
