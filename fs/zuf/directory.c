@@ -66,7 +66,7 @@ more:
 
 	err = zufc_dispatch(ZUF_ROOT(SBI(sb)), &ioc_readdir.hdr, pages, nump);
 	if (unlikely(err && err != -EINTR)) {
-		zuf_err("zufc_dispatch failed => %d\n", err);
+		zuf_err_dispatch(sb, "zufc_dispatch failed => %d\n", err);
 		goto out;
 	}
 

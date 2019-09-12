@@ -621,7 +621,9 @@ static int zuf_statfs(struct dentry *d, struct kstatfs *buf)
 
 	err = zufc_dispatch(ZUF_ROOT(sbi), &ioc_statfs.hdr, NULL, 0);
 	if (unlikely(err && err != -EINTR)) {
-		zuf_err("zufc_dispatch failed op=ZUFS_OP_STATFS => %d\n", err);
+		zuf_err_dispatch(sbi->sb,
+			"zufc_dispatch failed op=ZUFS_OP_STATFS => %d\n",
+			err);
 		return err;
 	}
 
@@ -654,7 +656,8 @@ static int zuf_show_options(struct seq_file *seq, struct dentry *root)
 
 	err = zufc_dispatch(ZUF_ROOT(sbi), &mo.imo.hdr, NULL, 0);
 	if (unlikely(err)) {
-		zuf_err("zufs_dispatch failed op=ZUS_OP_SHOW_OPTIONS => %d\n",
+		zuf_err_dispatch(sbi->sb,
+			"zufs_dispatch failed op=ZUS_OP_SHOW_OPTIONS => %d\n",
 			err);
 		/* NOTE: if zusd crashed and we try to run 'umount', it will
 		 * SEGFAULT because zufc_dispatch will return -EFAULT.

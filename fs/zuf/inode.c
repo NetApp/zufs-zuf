@@ -264,8 +264,8 @@ int zuf_evict_dispatch(struct super_block *sb, struct zus_inode_info *zus_ii,
 
 	err = zufc_dispatch(ZUF_ROOT(SBI(sb)), &ioc_evict_inode.hdr, NULL, 0);
 	if (unlikely(err && err != -EINTR))
-		zuf_err("zufc_dispatch failed op=%s => %d\n",
-			 zuf_op_name(operation), err);
+		zuf_err_dispatch(sb, "zufc_dispatch failed op=%s => %d\n",
+				 zuf_op_name(operation), err);
 	return err;
 }
 

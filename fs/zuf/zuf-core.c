@@ -315,9 +315,10 @@ static int _zu_mount(struct file *file, void *parg)
 	return err;
 }
 
-static void zufc_mounter_release(struct file *f)
+static void zufc_mounter_release(struct file *file)
 {
-	struct __mount_thread_info *zmt = &ZRI(f->f_inode->i_sb)->_ztp->mount;
+	struct zuf_root_info *zri = ZRI(file->f_inode->i_sb);
+	struct __mount_thread_info *zmt = &zri->_ztp->mount;
 
 	zuf_dbg_zus("closed fu=%d au=%d fw=%d aw=%d\n",
 		  zmt->relay.fss_wakeup, zmt->relay.app_wakeup,
@@ -326,8 +327,8 @@ static void zufc_mounter_release(struct file *f)
 	spin_lock(&zmt->lock);
 	zmt->zsf.file = NULL;
 	if (relay_is_app_waiting(&zmt->relay)) {
+		zri->state = ZUF_ROOT_SERVER_FAILED;
 		zuf_err("server emergency exit while IO\n");
-
 		if (zmt->zim)
 			zmt->zim->hdr.err = -EIO;
 		spin_unlock(&zmt->lock);
@@ -889,6 +890,7 @@ out:
 /* Caller checks that file->private_data != NULL */
 static void zufc_zt_release(struct file *file)
 {
+	struct zuf_root_info *zri = ZRI(file->f_inode->i_sb);
 	struct zufc_thread *zt = _zt_from_f_private(file);
 
 	if (unlikely(zt->hdr.file != file))
@@ -904,6 +906,8 @@ static void zufc_zt_release(struct file *file)
 
 		/* NOTE: Do not call _unmap_pages the vma is gone */
 		zt->hdr.file = NULL;
+
+		zri->state = ZUF_ROOT_SERVER_FAILED;
 
 		relay_app_wakeup(&zt->relay);
 		msleep(1000); /* crap */
@@ -1153,6 +1157,9 @@ int __zufc_dispatch(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
 	struct zufs_ioc_hdr *hdr = zdo->hdr;
 	int cpu;
 	struct zufc_thread *zt;
+
+	if (unlikely(zri->state == ZUF_ROOT_SERVER_FAILED))
+		return -EIO;
 
 	if (unlikely(hdr->out_len && !hdr->out_max)) {
 		/* TODO: Complain here and let caller code do this proper */

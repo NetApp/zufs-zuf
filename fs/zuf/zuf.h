@@ -53,6 +53,7 @@ enum {
 	ZUF_ROOT_INITIALIZING = 0,
 	ZUF_ROOT_REGISTERING_FS = 1,
 	ZUF_ROOT_MOUNT_READY = 2,
+	ZUF_ROOT_SERVER_FAILED	= 3,	/* server crashed unexpectedly */
 };
 
 /* This is the zuf-root.c mini filesystem */

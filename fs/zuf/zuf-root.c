@@ -165,6 +165,9 @@ static ssize_t _state_read(struct file *file, char __user *buf, size_t len,
 	case ZUF_ROOT_MOUNT_READY:
 		msg = "mount_ready\n";
 		break;
+	case ZUF_ROOT_SERVER_FAILED:
+		msg = "server_failed\n";
+		break;
 	default:
 		msg = "UNKNOWN\n";
 		break;

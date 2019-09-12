@@ -34,6 +34,11 @@
 	} while (0)
 #define zuf_info(s, args ...)          pr_info("~info~ " s, ## args)
 
+#define zuf_err_dispatch(sb, s, args ...) \
+	do { if (zuf_fst(sb)->zri->state != ZUF_ROOT_SERVER_FAILED) \
+		pr_err("[%s:%d] " s, __func__, __LINE__, ## args); \
+	} while (0)
+
 #define zuf_chan_debug(c, s, args...)	pr_debug(c " [%s:%d] " s, __func__, \
 							__LINE__, ## args)
 
