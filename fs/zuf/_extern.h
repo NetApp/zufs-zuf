@@ -57,6 +57,9 @@ int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs);
 int zuf_init_inodecache(void);
 void zuf_destroy_inodecache(void);
 
+int zuf_8k_cache_init(void);
+void zuf_8k_cache_fini(void);
+
 void zuf_sync_inc(struct inode *inode);
 void zuf_sync_dec(struct inode *inode, ulong write_unmapped);
 

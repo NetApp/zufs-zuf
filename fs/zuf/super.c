@@ -926,3 +926,29 @@ out:
 
 	return err ? ERR_PTR(err) : ret;
 }
+
+// ==== 8k fast_alloc ====
+static struct kmem_cache *zuf_8k_cachep;
+
+void *zuf_8k_alloc(gfp_t gfp)
+{
+	return kmem_cache_alloc(zuf_8k_cachep, gfp);
+}
+
+void zuf_8k_free(void *ptr)
+{
+	kmem_cache_free(zuf_8k_cachep, ptr);
+}
+
+int __init zuf_8k_cache_init(void)
+{
+	zuf_8k_cachep = kmem_cache_create("zuf_8k_cache", S_8K, 0, 0, NULL);
+	if (unlikely(!zuf_8k_cachep))
+		return -ENOMEM;
+	return 0;
+}
+
+void zuf_8k_cache_fini(void)
+{
+	kmem_cache_destroy(zuf_8k_cachep);
+}
