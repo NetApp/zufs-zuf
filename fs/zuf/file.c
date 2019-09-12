@@ -242,7 +242,7 @@ static int zuf_flush(struct file *file, fl_owner_t id)
 }
 
 static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
-		      u64 offset, u64 len)
+		      u64 offset, u64 length)
 {
 	struct super_block *sb = inode->i_sb;
 	struct zuf_inode_info *zii = ZUII(inode);
@@ -252,7 +252,7 @@ static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		.hdr.out_len = sizeof(ioc_fiemap),
 		.zus_ii = zii->zus_ii,
 		.start = offset,
-		.length = len,
+		.length = length,
 		.flags = fieinfo->fi_flags,
 	};
 	struct page *pages[ZUS_API_MAP_MAX_PAGES];
@@ -260,7 +260,7 @@ static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 	int i, err;
 
 	zuf_dbg_vfs("[%ld] offset=0x%llx len=0x%llx extents_max=%u flags=0x%x\n",
-		    inode->i_ino, offset, len, fieinfo->fi_extents_max,
+		    inode->i_ino, offset, length, fieinfo->fi_extents_max,
 		    fieinfo->fi_flags);
 
 	/* TODO: Have support for FIEMAP_FLAG_XATTR */
