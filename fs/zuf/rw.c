@@ -914,6 +914,26 @@ static int iom_wbinv(__u64 **cur_e)
 	return 0;
 }
 
+static int iom_discard(struct super_block *sb, struct t2_io_state *tis,
+		       __u64 **cur_e)
+{
+	struct zufs_iom_t2_io_len *t2iol = (void *)*cur_e;
+	ulong t2 = _zufs_iom_first_val(&t2iol->iom.t2_val);
+	ulong local_t2 = md_t2_local_bn(tis->md, t2);
+	struct md_dev_info *mdi;
+	int err;
+
+	mdi = md_bn_t2_dev(tis->md, t2);
+
+	err = blkdev_issue_discard(mdi->bdev, local_t2 << (PAGE_SHIFT - 9),
+				   t2iol->num_pages << (PAGE_SHIFT - 9),
+				   GFP_NOFS, 0);
+
+	*cur_e = (void *)(t2iol + 1);
+
+	return err;
+}
+
 struct _iom_exec_info {
 	struct super_block *sb;
 	struct inode *inode;
@@ -935,12 +955,14 @@ static int _iom_execute_inline(struct _iom_exec_info *iei)
 	uint wrmem = 0;
 	uint rdmem = 0;
 	uint wbinv = 0;
+	uint discard = 0;
 #	define	WRS()	(++wrs)
 #	define	RDS()	(++rds)
 #	define	UNS()	(++uns)
 #	define	WRMEM()	(++wrmem)
 #	define	RDMEM()	(++rdmem)
 #	define	WBINV()	(++wbinv)
+#	define	DISCARD()	(++discard)
 #else
 #	define	WRS()
 #	define	RDS()
@@ -948,6 +970,7 @@ static int _iom_execute_inline(struct _iom_exec_info *iei)
 #	define	WRMEM()
 #	define	RDMEM()
 #	define	WBINV()
+#	define	DISCARD()
 #endif /* !def CONFIG_ZUF_DEBUG */
 
 	cur_e =  iei->iom_e;
@@ -996,6 +1019,11 @@ static int _iom_execute_inline(struct _iom_exec_info *iei)
 		case IOM_WBINV:
 			err = iom_wbinv(&cur_e);
 			WBINV();
+			break;
+
+		case IOM_DISCARD:
+			err = iom_discard(iei->sb, iei->wr_tis, &cur_e);
+			DISCARD();
 			break;
 
 		default:

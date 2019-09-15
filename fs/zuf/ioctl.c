@@ -264,6 +264,44 @@ static int _ioc_setversion(struct inode *inode, uint __user *parg)
 	return err;
 }
 
+noinline
+static int _fitrim(struct inode *inode, uint cmd, ulong arg, char *on_stack,
+		   uint stack_size)
+{
+	struct multi_devices *md = SBI(inode->i_sb)->md;
+	void __user *parg = (void __user *)arg;
+	struct fstrim_range range;
+	int i, last_t2;
+	ulong end;
+
+	if (copy_from_user(&range, parg, sizeof(range)))
+		return -EFAULT;
+
+	if (unlikely(md_t2_blocks(md) < md_o2p(range.start)))
+		return -EINVAL;
+
+	if (unlikely(range.len < range.minlen))
+		return 0;
+
+	i = md_bn_t2_dev(md, md_o2p(range.start))->index;
+
+	end = min(md_o2p(range.start + range.len), md_t2_blocks(md) - 1);
+	last_t2 = md_bn_t2_dev(md, end)->index;
+
+	for (; i <= last_t2 ; ++i) {
+		struct request_queue *bdev_q;
+
+		bdev_q = bdev_get_queue(md_dev_info(md, i)->bdev);
+		if (!blk_queue_discard(bdev_q))
+			return -EINVAL;
+
+		range.minlen = max((unsigned int)range.minlen,
+				   bdev_q->limits.discard_granularity);
+	}
+
+	return _ioctl_dispatch(inode, cmd, arg, on_stack, stack_size);
+}
+
 long zuf_ioctl(struct file *filp, unsigned int cmd, ulong arg)
 {
 	void __user *parg = (void __user *)arg;
@@ -278,6 +316,9 @@ long zuf_ioctl(struct file *filp, unsigned int cmd, ulong arg)
 		return put_user(filp->f_inode->i_generation, (int __user *)arg);
 	case FS_IOC_SETVERSION:
 		return _ioc_setversion(filp->f_inode, parg);
+	case FITRIM:
+		return _fitrim(filp->f_inode, cmd, arg, on_stack,
+			       sizeof(on_stack));
 	default:
 		return _ioctl_dispatch(filp->f_inode, cmd, arg, on_stack,
 				       sizeof(on_stack));
