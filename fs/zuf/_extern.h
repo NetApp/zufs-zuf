@@ -132,6 +132,26 @@ long zuf_ioctl(struct file *filp, uint cmd, ulong arg);
 long zuf_compat_ioctl(struct file *file, uint cmd, ulong arg);
 #endif
 
+/* xattr.c */
+int zuf_initxattrs(struct inode *inode, const struct xattr *xattr_array,
+		   void *fs_info);
+ssize_t __zuf_getxattr(struct inode *inode, int type, const char *name,
+		       void *buffer, size_t size);
+int __zuf_setxattr(struct inode *inode, int type, const char *name,
+		   const void *value, size_t size, int flags);
+ssize_t zuf_listxattr(struct dentry *dentry, char *buffer, size_t size);
+extern const struct xattr_handler *zuf_xattr_handlers[];
+
+/* acl.c */
+int zuf_set_acl(struct inode *inode, struct posix_acl *acl, int type);
+struct posix_acl *zuf_get_acl(struct inode *inode, int type);
+int zuf_acls_create_pre(struct inode *dir, umode_t *mode,
+			struct posix_acl **def_acl, struct posix_acl **acl);
+int zuf_acls_create_post(struct inode *dir, struct inode *inode,
+			 struct posix_acl *def_acl, struct posix_acl *acl);
+extern const struct xattr_handler zuf_acl_access_xattr_handler;
+extern const struct xattr_handler zuf_acl_default_xattr_handler;
+
 /*
  * Inode and files operations
  */

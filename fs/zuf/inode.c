@@ -287,6 +287,7 @@ void zuf_evict_inode(struct inode *inode)
 			_warn_inode_dirty(inode, zii->zi);
 
 		zuf_w_lock(zii);
+		zuf_xaw_lock(zii); /* Needed? probably not but palying safe */
 
 		zufc_goose_all_zts(ZUF_ROOT(SBI(sb)), inode);
 
@@ -295,6 +296,7 @@ void zuf_evict_inode(struct inode *inode)
 		inode->i_mtime = inode->i_ctime = current_time(inode);
 		inode->i_size = 0;
 
+		zuf_xaw_unlock(zii);
 		zuf_w_unlock(zii);
 	} else {
 		zuf_dbg_vfs("[%ld] inode is going down?\n", inode->i_ino);
@@ -341,6 +343,7 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 		.flags = tmpfile ? ZI_TMPFILE : 0,
 		.str.len = qstr->len,
 	};
+	struct posix_acl *acl = NULL, *def_acl = NULL;
 	struct inode *inode;
 	struct zus_inode *zi = NULL;
 	struct page *pages[2];
@@ -359,6 +362,15 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 	inode->i_atime = inode->i_ctime;
 
 	zuf_dbg_verbose("inode=%p name=%s\n", inode, qstr->name);
+
+	err = security_inode_init_security(inode, dir, qstr, zuf_initxattrs,
+					   NULL);
+	if (err && err != -EOPNOTSUPP)
+		goto fail;
+
+	err = zuf_acls_create_pre(dir, &inode->i_mode, &def_acl, &acl);
+	if (unlikely(err))
+		goto fail;
 
 	zuf_set_inode_flags(inode, &ioc_new_inode.zi);
 
@@ -399,6 +411,12 @@ struct inode *zuf_new_inode(struct inode *dir, umode_t mode,
 		    zi->i_mtime, zi->i_nlink, zi->i_mode, zi->i_xattr);
 
 	zuf_dbg_verbose("allocating inode %ld (zi=%p)\n", _zi_ino(zi), zi);
+
+	if ((def_acl || acl) && !symname) {
+		err = zuf_acls_create_post(dir, inode, def_acl, acl);
+		if (unlikely(err))
+			goto fail;
+	}
 
 	err = insert_inode_locked(inode);
 	if (unlikely(err)) {
