@@ -446,6 +446,17 @@ enum e_zufs_operation {
 	ZUFS_OP_STATFS		= 2,
 	ZUFS_OP_SHOW_OPTIONS	= 3,
 
+	ZUFS_OP_NEW_INODE	= 4,
+	ZUFS_OP_FREE_INODE	= 5,
+	ZUFS_OP_EVICT_INODE	= 6,
+
+	ZUFS_OP_LOOKUP		= 7,
+	ZUFS_OP_ADD_DENTRY	= 8,
+	ZUFS_OP_REMOVE_DENTRY	= 9,
+	ZUFS_OP_RENAME		= 10,
+
+	ZUFS_OP_SETATTR		= 19,
+
 	ZUFS_OP_MAX_OPT,
 };
 
@@ -469,5 +480,88 @@ struct zufs_ioc_statfs {
 	/* OUT */
 	struct statfs64 statfs_out;
 };
+
+/* zufs_ioc_new_inode flags: */
+enum zi_flags {
+	ZI_TMPFILE = 1,		/* for new_inode */
+	ZI_LOOKUP_RACE = 1,	/* for evict */
+};
+
+struct zufs_str {
+	__u8 len;
+	char name[ZUFS_NAME_LEN];
+};
+
+/* ZUFS_OP_NEW_INODE */
+struct zufs_ioc_new_inode {
+	struct zufs_ioc_hdr hdr;
+	 /* IN */
+	struct zus_inode zi;
+	struct zus_inode_info *dir_ii; /* If mktmp this is the root */
+	struct zufs_str str;
+	__u64 flags;
+
+	 /* OUT */
+	zu_dpp_t _zi;
+	struct zus_inode_info *zus_ii;
+};
+
+/* ZUFS_OP_FREE_INODE, ZUFS_OP_EVICT_INODE */
+struct zufs_ioc_evict_inode {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 flags;
+};
+
+/* ZUFS_OP_LOOKUP */
+struct zufs_ioc_lookup {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *dir_ii;
+	struct zufs_str str;
+
+	 /* OUT */
+	zu_dpp_t _zi;
+	struct zus_inode_info *zus_ii;
+};
+
+/* ZUFS_OP_ADD_DENTRY, ZUFS_OP_REMOVE_DENTRY */
+struct zufs_ioc_dentry {
+	struct zufs_ioc_hdr hdr;
+	struct zus_inode_info *zus_ii; /* IN */
+	struct zus_inode_info *zus_dir_ii; /* IN */
+	struct zufs_str str; /* IN */
+	__u64 ino; /* OUT - only for lookup */
+};
+
+/* ZUFS_OP_RENAME */
+struct zufs_ioc_rename {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *old_dir_ii;
+	struct zus_inode_info *new_dir_ii;
+	struct zus_inode_info *old_zus_ii;
+	struct zus_inode_info *new_zus_ii;
+	struct zufs_str old_d_str;
+	struct zufs_str new_d_str;
+	__u64 time;
+	__u64 flags;
+};
+
+/* ZUFS_OP_SETATTR */
+struct zufs_ioc_attr {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u32 zuf_attr;
+	__u32 pad;
+};
+
+/* Special flag for ZUFS_OP_FALLOCATE to specify a setattr(SIZE)
+ * IE. same as punch hole but set_i_size to be @filepos. In this
+ * case @last_pos == ~0ULL
+ */
+#define ZUFS_FL_TRUNCATE 0x80000000
 
 #endif /* _LINUX_ZUFS_API_H */
