@@ -130,6 +130,9 @@ enum {
 struct zuf_inode_info {
 	struct inode		vfs_inode;
 
+	/* Stuff for mmap write */
+	struct rw_semaphore	in_sync;
+
 	/* cookies from Server */
 	struct zus_inode	*zi;
 	struct zus_inode_info	*zus_ii;
@@ -246,6 +249,66 @@ static inline void *zuf_dpp_t_addr(struct super_block *sb, zu_dpp_t v)
 		return NULL;
 
 	return md_addr_verify(SBI(sb)->md, zu_dpp_t_val(v));
+}
+
+/* ~~~~ inode locking ~~~~ */
+static inline void zuf_r_lock(struct zuf_inode_info *zii)
+{
+	inode_lock_shared(&zii->vfs_inode);
+}
+static inline void zuf_r_unlock(struct zuf_inode_info *zii)
+{
+	inode_unlock_shared(&zii->vfs_inode);
+}
+
+static inline void zuf_smr_lock(struct zuf_inode_info *zii)
+{
+	down_read_nested(&zii->in_sync, 1);
+}
+static inline void zuf_smr_lock_pagefault(struct zuf_inode_info *zii)
+{
+	down_read_nested(&zii->in_sync, 2);
+}
+static inline void zuf_smr_unlock(struct zuf_inode_info *zii)
+{
+	up_read(&zii->in_sync);
+}
+
+static inline void zuf_smw_lock(struct zuf_inode_info *zii)
+{
+	down_write(&zii->in_sync);
+}
+static inline void zuf_smw_lock_nested(struct zuf_inode_info *zii)
+{
+	down_write_nested(&zii->in_sync, 1);
+}
+static inline void zuf_smw_unlock(struct zuf_inode_info *zii)
+{
+	up_write(&zii->in_sync);
+}
+
+static inline void zuf_w_lock(struct zuf_inode_info *zii)
+{
+	inode_lock(&zii->vfs_inode);
+	zuf_smw_lock(zii);
+}
+static inline void zuf_w_lock_nested(struct zuf_inode_info *zii)
+{
+	inode_lock_nested(&zii->vfs_inode, 2);
+	zuf_smw_lock_nested(zii);
+}
+static inline void zuf_w_unlock(struct zuf_inode_info *zii)
+{
+	zuf_smw_unlock(zii);
+	inode_unlock(&zii->vfs_inode);
+}
+
+static inline void ZUF_CHECK_I_W_LOCK(struct inode *inode)
+{
+#ifdef CONFIG_ZUF_DEBUG
+	if (WARN_ON(down_write_trylock(&inode->i_rwsem)))
+		up_write(&inode->i_rwsem);
+#endif
 }
 
 enum big_alloc_type { ba_stack, ba_8k, ba_vmalloc };

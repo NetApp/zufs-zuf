@@ -784,6 +784,8 @@ void zuf_destroy_inodecache(void)
 static struct super_operations zuf_sops = {
 	.alloc_inode	= zuf_alloc_inode,
 	.destroy_inode	= zuf_destroy_inode,
+	.write_inode	= zuf_write_inode,
+	.evict_inode	= zuf_evict_inode,
 	.put_super	= zuf_put_super,
 	.freeze_fs	= zuf_update_s_wtime,
 	.unfreeze_fs	= zuf_update_s_wtime,
