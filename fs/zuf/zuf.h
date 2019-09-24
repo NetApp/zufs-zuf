@@ -130,6 +130,8 @@ enum {
 struct zuf_inode_info {
 	struct inode		vfs_inode;
 
+	/* Lock for xattr operations */
+	struct rw_semaphore	xa_rwsem;
 	/* Stuff for mmap write */
 	struct rw_semaphore	in_sync;
 	struct list_head	i_mmap_dirty;
@@ -313,6 +315,38 @@ static inline void ZUF_CHECK_I_W_LOCK(struct inode *inode)
 		up_write(&inode->i_rwsem);
 #endif
 }
+static inline void zuf_xar_lock(struct zuf_inode_info *zii)
+{
+	down_read(&zii->xa_rwsem);
+}
+
+static inline void zuf_xar_unlock(struct zuf_inode_info *zii)
+{
+	up_read(&zii->xa_rwsem);
+}
+
+static inline void zuf_xaw_lock(struct zuf_inode_info *zii)
+{
+	down_write(&zii->xa_rwsem);
+}
+
+static inline void zuf_xaw_unlock(struct zuf_inode_info *zii)
+{
+	up_write(&zii->xa_rwsem);
+}
+
+/* xattr types */
+enum {	ZUF_XF_SECURITY    = 1,
+	ZUF_XF_SYSTEM      = 2,
+	ZUF_XF_TRUSTED     = 3,
+	ZUF_XF_USER        = 4,
+};
+
+struct zuf_acl {
+	__le16	tag;
+	__le16	perm;
+	__le32	id;
+};
 
 enum big_alloc_type { ba_stack, ba_8k, ba_vmalloc };
 #define S_8K (1024UL * 8)
