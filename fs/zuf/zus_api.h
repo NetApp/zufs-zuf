@@ -467,6 +467,9 @@ enum e_zufs_operation {
 	ZUFS_OP_FALLOCATE	= 21,
 	ZUFS_OP_LLSEEK		= 22,
 	ZUFS_OP_IOCTL		= 23,
+	ZUFS_OP_XATTR_GET	= 24,
+	ZUFS_OP_XATTR_SET	= 25,
+	ZUFS_OP_XATTR_LIST	= 27,
 	ZUFS_OP_FIEMAP		= 28,
 
 	ZUFS_OP_GET_MULTY	= 29,
@@ -745,6 +748,26 @@ struct zufs_ioc_ioctl {
 	};
 };
 
+/* ZUFS_OP_XATTR */
+/* xattr ioc_flags */
+#define ZUFS_XATTR_SET_EMPTY	(1 << 0)
+#define ZUFS_XATTR_TRUSTED	(1 << 1)
+
+struct zufs_ioc_xattr {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u32	flags;
+	__u32	type;
+	__u16	name_len;
+	__u16	ioc_flags;
+
+	/* OUT */
+	__u32	user_buf_size;
+	char	buf[0];
+};
+
+
 /* ZUFS_OP_FIEMAP */
 struct zufs_ioc_fiemap {
 	struct zufs_ioc_hdr hdr;
@@ -760,7 +783,7 @@ struct zufs_ioc_fiemap {
 	__u32	extents_mapped;
 	__u32	pad;
 
-} __packed;
+};
 
 struct zufs_fiemap_extent_info {
 	struct fiemap_extent *fi_extents_start;

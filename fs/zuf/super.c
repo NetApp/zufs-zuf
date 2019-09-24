@@ -553,6 +553,7 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 		sb->s_flags |= SB_POSIXACL;
 
 	sb->s_op = &zuf_sops;
+	sb->s_xattr = zuf_xattr_handlers;
 
 	root_i = zuf_iget(sb, ioc_mount->zmi.zus_ii, ioc_mount->zmi._zi,
 			  &exist);
@@ -845,6 +846,7 @@ static void _init_once(void *foo)
 	inode_init_once(&zii->vfs_inode);
 	INIT_LIST_HEAD(&zii->i_mmap_dirty);
 	zii->zi = NULL;
+	init_rwsem(&zii->xa_rwsem);
 	init_rwsem(&zii->in_sync);
 	atomic_set(&zii->vma_count, 0);
 	atomic_set(&zii->write_mapped, 0);
