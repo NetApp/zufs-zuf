@@ -124,6 +124,15 @@ int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma)
 	if (!zsf || zsf->type != zlfs_e_pmem)
 		return -EPERM;
 
+	/* Valgrined may interfere with our 2M mmap aligned vma start
+	 * (See zufr_get_unmapped_area). Tell the guys to back off
+	 */
+	if (unlikely(vma->vm_start & ~PMD_MASK)) {
+		zuf_err("mmap is not 2M aligned vm_start=0x%lx\n",
+				vma->vm_start);
+		return -EINVAL;
+	}
+
 	vma->vm_flags |= VM_HUGEPAGE;
 	vma->vm_ops = &t1_vm_ops;
 

@@ -64,8 +64,11 @@ int zuf_private_mount(struct zuf_root_info *zri, struct register_fs_info *rfi,
 int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb);
 struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
 				   struct zus_sb_info *zus_sbi);
+void zuf_sync_inc(struct inode *inode);
+void zuf_sync_dec(struct inode *inode, ulong write_unmapped);
 
 /* file.c */
+int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync);
 long __zuf_fallocate(struct inode *inode, int mode, loff_t offset, loff_t len);
 
 /* namei.c */
@@ -113,6 +116,9 @@ int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
 			 __u64 *iom_e_user, uint iom_n);
 int zuf_rw_file_range_compare(struct inode *i_in, loff_t pos_in,
 			      struct inode *i_out, loff_t pos_out, loff_t len);
+
+/* mmap.c */
+int zuf_file_mmap(struct file *file, struct vm_area_struct *vma);
 
 /* t1.c */
 int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);

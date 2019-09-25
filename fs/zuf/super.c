@@ -737,6 +737,90 @@ static int zuf_update_s_wtime(struct super_block *sb)
 	return 0;
 }
 
+static void _sync_add_inode(struct inode *inode)
+{
+	struct zuf_sb_info *sbi = SBI(inode->i_sb);
+	struct zuf_inode_info *zii = ZUII(inode);
+
+	zuf_dbg_mmap("[%ld] write_mapped=%d\n",
+		      inode->i_ino, atomic_read(&zii->write_mapped));
+
+	spin_lock(&sbi->s_mmap_dirty_lock);
+
+	/* Because we are lazy removing the inodes, only in case of an fsync
+	 * or an evict_inode. It is fine if we are call multiple times.
+	 */
+	if (list_empty(&zii->i_mmap_dirty))
+		list_add(&zii->i_mmap_dirty, &sbi->s_mmap_dirty);
+
+	spin_unlock(&sbi->s_mmap_dirty_lock);
+}
+
+static void _sync_remove_inode(struct inode *inode)
+{
+	struct zuf_sb_info *sbi = SBI(inode->i_sb);
+	struct zuf_inode_info *zii = ZUII(inode);
+
+	zuf_dbg_mmap("[%ld] write_mapped=%d\n",
+		      inode->i_ino, atomic_read(&zii->write_mapped));
+
+	spin_lock(&sbi->s_mmap_dirty_lock);
+	list_del_init(&zii->i_mmap_dirty);
+	spin_unlock(&sbi->s_mmap_dirty_lock);
+}
+
+void zuf_sync_inc(struct inode *inode)
+{
+	struct zuf_inode_info *zii = ZUII(inode);
+
+	if (1 == atomic_inc_return(&zii->write_mapped))
+		_sync_add_inode(inode);
+}
+
+/* zuf_sync_dec will unmapped in batches */
+void zuf_sync_dec(struct inode *inode, ulong write_unmapped)
+{
+	struct zuf_inode_info *zii = ZUII(inode);
+
+	if (0 == atomic_sub_return(write_unmapped, &zii->write_mapped))
+		_sync_remove_inode(inode);
+}
+
+/*
+ * We must fsync any mmap-active inodes
+ */
+static int zuf_sync_fs(struct super_block *sb, int wait)
+{
+	struct zuf_sb_info *sbi = SBI(sb);
+	struct zuf_inode_info *zii, *t;
+	enum {to_clean_size = 120};
+	struct zuf_inode_info *zii_to_clean[to_clean_size];
+	uint i, to_clean;
+
+	zuf_dbg_vfs("Syncing wait=%d\n", wait);
+more_inodes:
+	spin_lock(&sbi->s_mmap_dirty_lock);
+	to_clean = 0;
+	list_for_each_entry_safe(zii, t, &sbi->s_mmap_dirty, i_mmap_dirty) {
+		list_del_init(&zii->i_mmap_dirty);
+		zii_to_clean[to_clean++] = zii;
+		if (to_clean >= to_clean_size)
+			break;
+	}
+	spin_unlock(&sbi->s_mmap_dirty_lock);
+
+	if (!to_clean)
+		return 0;
+
+	for (i = 0; i < to_clean; ++i)
+		zuf_isync(&zii_to_clean[i]->vfs_inode, 0, ~0 - 1, 1);
+
+	if (to_clean == to_clean_size)
+		goto more_inodes;
+
+	return 0;
+}
+
 static struct inode *zuf_alloc_inode(struct super_block *sb)
 {
 	struct zuf_inode_info *zii;
@@ -759,7 +843,11 @@ static void _init_once(void *foo)
 	struct zuf_inode_info *zii = foo;
 
 	inode_init_once(&zii->vfs_inode);
+	INIT_LIST_HEAD(&zii->i_mmap_dirty);
 	zii->zi = NULL;
+	init_rwsem(&zii->in_sync);
+	atomic_set(&zii->vma_count, 0);
+	atomic_set(&zii->write_mapped, 0);
 }
 
 int __init zuf_init_inodecache(void)
@@ -789,6 +877,7 @@ static struct super_operations zuf_sops = {
 	.put_super	= zuf_put_super,
 	.freeze_fs	= zuf_update_s_wtime,
 	.unfreeze_fs	= zuf_update_s_wtime,
+	.sync_fs	= zuf_sync_fs,
 	.statfs		= zuf_statfs,
 	.remount_fs	= zuf_remount,
 	.show_options	= zuf_show_options,
