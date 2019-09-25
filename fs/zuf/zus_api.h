@@ -459,7 +459,9 @@ enum e_zufs_operation {
 	ZUFS_OP_READ		= 14,
 	ZUFS_OP_PRE_READ	= 15,
 	ZUFS_OP_WRITE		= 16,
+	ZUFS_OP_MMAP_CLOSE	= 17,
 	ZUFS_OP_SETATTR		= 19,
+	ZUFS_OP_SYNC		= 20,
 	ZUFS_OP_FALLOCATE	= 21,
 
 	ZUFS_OP_GET_MULTY	= 29,
@@ -645,6 +647,13 @@ static inline bool zufs_zde_emit(struct zufs_readdir_iter *rdi, __u64 ino,
 }
 #endif /* ndef __cplusplus */
 
+struct zufs_ioc_mmap_close {
+	struct zufs_ioc_hdr hdr;
+	 /* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 rw; /* Some flags + READ or WRITE */
+};
+
 /* ZUFS_OP_SETATTR */
 struct zufs_ioc_attr {
 	struct zufs_ioc_hdr hdr;
@@ -652,6 +661,23 @@ struct zufs_ioc_attr {
 	struct zus_inode_info *zus_ii;
 	__u32 zuf_attr;
 	__u32 pad;
+};
+
+/* ZUFS_OP_SYNC */
+enum ZUFS_SYNC_FLAGS {
+	ZUFS_SF_DATASYNC		= 0x00000001,
+	ZUFS_SF_DONTNEED		= 0x00000100,
+};
+
+struct zufs_ioc_sync {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 offset, length;
+	__u64 flags;
+
+	/* OUT */
+	__u64 write_unmapped;
 };
 
 /* ~~~~ io_map structures && IOCTL(s) ~~~~ */
