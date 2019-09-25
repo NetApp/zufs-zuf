@@ -456,7 +456,15 @@ enum e_zufs_operation {
 	ZUFS_OP_RENAME		= 10,
 	ZUFS_OP_READDIR		= 11,
 
+	ZUFS_OP_READ		= 14,
+	ZUFS_OP_PRE_READ	= 15,
+	ZUFS_OP_WRITE		= 16,
 	ZUFS_OP_SETATTR		= 19,
+	ZUFS_OP_FALLOCATE	= 21,
+
+	ZUFS_OP_GET_MULTY	= 29,
+	ZUFS_OP_PUT_MULTY	= 30,
+	ZUFS_OP_NOOP		= 31,
 
 	ZUFS_OP_MAX_OPT,
 };
@@ -646,10 +654,253 @@ struct zufs_ioc_attr {
 	__u32 pad;
 };
 
+/* ~~~~ io_map structures && IOCTL(s) ~~~~ */
+/*
+ * These set of structures and helpers are used in return of zufs_ioc_IO and
+ * also at ZU_IOC_IOMAP_EXEC, NULL terminating list (array)
+ *
+ * Each iom_elemet stars with an __u64 of which the 8 hight bits carry an
+ * operation_type, And the 56 bits value denotes a page offset, (md_o2p()) or a
+ * length. operation_type is one of ZUFS_IOM_TYPE enum.
+ * The interpreter then jumps to the next operation depending on the size
+ * of the defined operation.
+ */
+
+enum ZUFS_IOM_TYPE {
+	IOM_NONE	= 0,
+	IOM_T1_WRITE	= 1,
+	IOM_T1_READ	= 2,
+
+	IOM_T2_WRITE	= 3,
+	IOM_T2_READ	= 4,
+	IOM_T2_WRITE_LEN = 5,
+	IOM_T2_READ_LEN	= 6,
+
+	IOM_T2_ZUSMEM_WRITE = 7,
+	IOM_T2_ZUSMEM_READ = 8,
+
+	IOM_UNMAP	= 9,
+	IOM_WBINV	= 10,
+	IOM_REPEAT	= 11,
+
+	IOM_NUM_LEGAL_OPT,
+};
+
+#define ZUFS_IOM_VAL_BITS	56
+#define ZUFS_IOM_FIRST_VAL_MASK ((1UL << ZUFS_IOM_VAL_BITS) - 1)
+
+static inline enum ZUFS_IOM_TYPE _zufs_iom_opt_type(__u64 *iom_e)
+{
+	uint ret = (*iom_e) >> ZUFS_IOM_VAL_BITS;
+
+	if (ret >= IOM_NUM_LEGAL_OPT)
+		return IOM_NONE;
+	return (enum ZUFS_IOM_TYPE)ret;
+}
+
+static inline bool _zufs_iom_pop(__u64 *iom_e)
+{
+	return _zufs_iom_opt_type(iom_e) != IOM_NONE;
+}
+
+static inline ulong _zufs_iom_first_val(__u64 *iom_elemets)
+{
+	return *iom_elemets & ZUFS_IOM_FIRST_VAL_MASK;
+}
+
+static inline void _zufs_iom_enc_type_val(__u64 *ptr, enum ZUFS_IOM_TYPE type,
+					 ulong val)
+{
+	*ptr = (__u64)val | ((__u64)type << ZUFS_IOM_VAL_BITS);
+}
+
+static inline ulong _zufs_iom_t1_bn(__u64 val)
+{
+	if (unlikely(_zufs_iom_opt_type(&val) != IOM_T1_READ))
+		return -1;
+
+	return zu_dpp_t_bn(_zufs_iom_first_val(&val));
+}
+
+static inline void _zufs_iom_enc_bn(__u64 *ptr, ulong bn, uint pool)
+{
+	_zufs_iom_enc_type_val(ptr, IOM_T1_READ, zu_enc_dpp_t_bn(bn, pool));
+}
+
+/* IOM_T1_WRITE / IOM_T1_READ
+ * May be followed by an IOM_REPEAT
+ */
+struct zufs_iom_t1_io {
+	/* Special dpp_t that denote a page ie: bn << 3 | zu_dpp_t_pool  */
+	__u64	t1_val;
+};
+
+/* IOM_T2_WRITE / IOM_T2_READ */
+struct zufs_iom_t2_io {
+	__u64	t2_val;
+	zu_dpp_t t1_val;
+};
+
+/* IOM_T2_WRITE_LEN / IOM_T2_READ_LEN */
+struct zufs_iom_t2_io_len {
+	struct zufs_iom_t2_io iom;
+	__u64 num_pages;
+};
+
+/* IOM_T2_ZUSMEM_WRITE / IOM_T2_ZUSMEM_READ */
+struct zufs_iom_t2_zusmem_io {
+	__u64	t2_val;
+	__u64	zus_mem_ptr; /* needs an get_user_pages() */
+	__u64	len;
+};
+
+/* IOM_UNMAP:
+ *	Executes unmap_mapping_range & remove of zuf's block-caching
+ *
+ * For now iom_unmap means even_cows=0, because Kernel takes care of all
+ * the cases of the even_cows=1. In future if needed it will be on the high
+ * bit of unmap_n.
+ */
+struct zufs_iom_unmap {
+	__u64	unmap_index;	/* Offset in pages of inode */
+	__u64	unmap_n;	/* Num pages to unmap (0 means: to eof) */
+	__u64	ino;		/* Pages of this inode */
+};
+
+#define ZUFS_WRITE_OP_SPACE						\
+	((sizeof(struct zufs_iom_unmap) +				\
+	  sizeof(struct zufs_iom_t2_io)) / sizeof(__u64) + sizeof(__u64))
+
+struct zus_iomap_build;
+/* For ZUFS_OP_IOM_DONE */
+struct zufs_ioc_iomap_done {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_sb_info *zus_sbi;
+
+	/* The cookie received from zufs_ioc_iomap_exec */
+	struct	zus_iomap_build *iomb;
+};
+
+struct zufs_iomap {
+	/* A cookie from zus to return when execution is done */
+	struct	zus_iomap_build *iomb;
+
+	__u32	iom_max;	/* num of __u64 allocated	 */
+	__u32	iom_n;		/* num of valid __u64 in iom_e	 */
+	__u64	iom_e[0];	/* encoded operations to execute */
+
+	/* This struct must be last */
+};
+
+/*
+ * Execute an iomap in behalf of the Server
+ *
+ * NOTE: this IOCTL must come on an above ZU_IOC_ALLOC_BUFFER type file
+ * and the passed arg-buffer must be the pointer returned from an mmap
+ * call preformed in the file, before the call to this IOC.
+ * If this is not done the IOCTL will return EINVAL.
+ */
+struct zufs_ioc_iomap_exec {
+	struct zufs_ioc_hdr hdr;
+	/* The ID of the super block received in mount */
+	__u64	sb_id;
+	/* We verify the sb_id validity against zus_sbi */
+	struct zus_sb_info *zus_sbi;
+	/* If application buffers they are from this IO*/
+	__u64	zt_iocontext;
+	/* Only return from IOCTL when finished. iomap_done NOT called */
+	__u32	wait_for_done;
+	__u32	__pad;
+
+	struct zufs_iomap ziom; /* must be last */
+};
+#define ZU_IOC_IOMAP_EXEC	_IOWR('Z', 19, struct zufs_ioc_iomap_exec)
+
+/*
+ * ZUFS_OP_READ / ZUFS_OP_WRITE / ZUFS_OP_FALLOCATE
+ *       also
+ * ZUFS_OP_GET_MULTY / ZUFS_OP_PUT_MULTY
+ */
+/* flags for zufs_ioc_IO->ret_flags */
+enum {
+	ZUFS_RET_RESERVED	= 0x0001, /* Not used */
+	ZUFS_RET_NEW		= 0x0002, /* In WRITE, allocated a new block */
+	ZUFS_RET_IOM_ALL_PMEM	= 0x0004, /* iom_e[] is encoded with pmem-bn */
+	ZUFS_RET_PUT_NOW	= 0x0008, /* GET_MULTY demands no pigi-puts  */
+	ZUFS_RET_LOCKED_PUT	= 0x0010, /* Same as PUT_NOW but must lock a zt
+					   * channel, Because GET took a lock
+					   */
+};
+
+/* flags for zufs_ioc_IO->rw */
+#define ZUFS_RW_WRITE	BIT(0)	/* SAME as WRITE in Kernel */
+#define ZUFS_RW_MMAP	BIT(1)
+
+#define ZUFS_RW_RAND	BIT(4)	/* fadvise(random) */
+
+/* Same meaning as IOCB_XXXX different bits */
+#define ZUFS_RW_KERN	8
+#define ZUFS_RW_EVENTFD	BIT(ZUFS_RW_KERN + 0)
+#define ZUFS_RW_APPEND	BIT(ZUFS_RW_KERN + 1)
+#define ZUFS_RW_DIRECT	BIT(ZUFS_RW_KERN + 2)
+#define ZUFS_RW_HIPRI	BIT(ZUFS_RW_KERN + 3)
+#define ZUFS_RW_DSYNC	BIT(ZUFS_RW_KERN + 4)
+#define ZUFS_RW_SYNC	BIT(ZUFS_RW_KERN + 5)
+#define ZUFS_RW_NOWAIT	BIT(ZUFS_RW_KERN + 7)
+#define ZUFS_RW_LAST_USED_BIT (ZUFS_RW_KERN + 7)
+/* ^^ PLEASE update (keep last) ^^ */
+
+/* 8 bits left for user */
+#define ZUFS_RW_USER_BITS 0xFF000000
+#define ZUFS_RW_USER	BIT(24)
+
 /* Special flag for ZUFS_OP_FALLOCATE to specify a setattr(SIZE)
  * IE. same as punch hole but set_i_size to be @filepos. In this
  * case @last_pos == ~0ULL
  */
 #define ZUFS_FL_TRUNCATE 0x80000000
+
+struct zufs_ioc_IO {
+	struct zufs_ioc_hdr hdr;
+
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 filepos;
+	__u64 rw;		/* One or more of ZUFS_RW_XXX		*/
+	__u32 ret_flags;	/* OUT - ZUFS_RET_XXX OUT		*/
+	__u32 pool;		/* All dpp_t(s) belong to this pool	*/
+	__u64 cookie;		/* For FS private use			*/
+
+	/* in / OUT */
+	/* For read-ahead (or alloc ahead) */
+	struct __zufs_ra {
+		union {
+			ulong start;
+			__u64 __start;
+		};
+		__u64 prev_pos;
+		__u32 ra_pages;
+		__u32 ra_pad; /* we need this */
+	} ra;
+
+	/* For writes TODO: encode at iom_e? */
+	struct __zufs_write_unmap {
+		__u32  offset;
+		__u32  len;
+	} wr_unmap;
+
+	/* The last offset in this IO. If 0, than error code at .hdr.err */
+	/* for ZUFS_OP_FALLOCATE this is the requested end offset */
+	__u64 last_pos;
+
+	struct zufs_iomap ziom;
+	__u64 iom_e[ZUFS_WRITE_OP_SPACE]; /* One tier_up for WRITE or GB */
+};
+
+static inline uint _ioc_IO_size(uint iom_n)
+{
+	return offsetof(struct zufs_ioc_IO, iom_e) + iom_n * sizeof(__u64);
+}
 
 #endif /* _LINUX_ZUFS_API_H */
