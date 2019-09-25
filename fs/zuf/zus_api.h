@@ -455,6 +455,8 @@ enum e_zufs_operation {
 	ZUFS_OP_REMOVE_DENTRY	= 9,
 	ZUFS_OP_RENAME		= 10,
 	ZUFS_OP_READDIR		= 11,
+	ZUFS_OP_CLONE		= 12,
+	ZUFS_OP_COPY		= 13,
 
 	ZUFS_OP_READ		= 14,
 	ZUFS_OP_PRE_READ	= 15,
@@ -463,6 +465,8 @@ enum e_zufs_operation {
 	ZUFS_OP_SETATTR		= 19,
 	ZUFS_OP_SYNC		= 20,
 	ZUFS_OP_FALLOCATE	= 21,
+	ZUFS_OP_LLSEEK		= 22,
+	ZUFS_OP_FIEMAP		= 28,
 
 	ZUFS_OP_GET_MULTY	= 29,
 	ZUFS_OP_PUT_MULTY	= 30,
@@ -679,6 +683,85 @@ struct zufs_ioc_sync {
 	/* OUT */
 	__u64 write_unmapped;
 };
+
+/* ZUFS_OP_CLONE */
+struct zufs_ioc_clone {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *src_zus_ii;
+	struct zus_inode_info *dst_zus_ii;
+	__u64 pos_in, pos_out;
+	__u64 len;
+	__u64 len_up;
+};
+
+/* ZUFS_OP_LLSEEK */
+struct zufs_ioc_seek {
+	struct zufs_ioc_hdr hdr;
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64 offset_in;
+	__u32 whence;
+	__u32 pad;
+
+	/* OUT */
+	__u64 offset_out;
+};
+
+/* ZUFS_OP_FIEMAP */
+struct zufs_ioc_fiemap {
+	struct zufs_ioc_hdr hdr;
+
+	/* IN */
+	struct zus_inode_info *zus_ii;
+	__u64	start;
+	__u64	length;
+	__u32	flags;
+	__u32	extents_max;
+
+	/* OUT */
+	__u32	extents_mapped;
+	__u32	pad;
+
+} __packed;
+
+struct zufs_fiemap_extent_info {
+	struct fiemap_extent *fi_extents_start;
+	__u32 fi_flags;
+	__u32 fi_extents_mapped;
+	__u32 fi_extents_max;
+	__u32 __pad;
+};
+
+static inline
+int zufs_fiemap_fill_next_extent(struct zufs_fiemap_extent_info *fieinfo,
+				 __u64 logical, __u64 phys,
+				 __u64 len, __u32 flags)
+{
+	struct fiemap_extent *dest = fieinfo->fi_extents_start;
+
+	if (fieinfo->fi_extents_max == 0) {
+		fieinfo->fi_extents_mapped++;
+		return (flags & FIEMAP_EXTENT_LAST) ? 1 : 0;
+	}
+
+	if (fieinfo->fi_extents_mapped >= fieinfo->fi_extents_max)
+		return 1;
+
+	dest += fieinfo->fi_extents_mapped;
+	dest->fe_logical = logical;
+	dest->fe_physical = phys;
+	dest->fe_length = len;
+	dest->fe_flags = flags;
+
+	fieinfo->fi_extents_mapped++;
+	if (fieinfo->fi_extents_mapped == fieinfo->fi_extents_max)
+		return 1;
+
+	return (flags & FIEMAP_EXTENT_LAST) ? 1 : 0;
+}
+
+
 
 /* ~~~~ io_map structures && IOCTL(s) ~~~~ */
 /*

@@ -664,6 +664,98 @@ ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
 			ii, kiocb, kiocb_ra(kiocb), ZUFS_OP_WRITE, rw);
 }
 
+static int _fadv_willneed(struct super_block *sb, struct inode *inode,
+			  loff_t offset, loff_t len, bool rand)
+{
+	struct zufs_ioc_IO io = {};
+	struct __zufs_ra ra = {
+		.start = md_o2p(offset),
+		.ra_pages = md_o2p_up(len),
+		.prev_pos = offset - 1,
+	};
+	int err;
+
+	io.ra.start = ra.start;
+	io.ra.ra_pages = ra.ra_pages;
+	io.ra.prev_pos = ra.prev_pos;
+	io.rw = rand ? ZUFS_RW_RAND : 0;
+
+	err = _IO_dispatch(SBI(sb), &io, ZUII(inode), ZUFS_OP_PRE_READ, 0,
+			   NULL, 0, offset, 0);
+	return err;
+}
+
+static int _fadv_dontneed(struct super_block *sb, struct inode *inode,
+			  loff_t offset, loff_t len)
+{
+	struct zufs_ioc_sync ioc_range = {
+		.hdr.in_len = sizeof(ioc_range),
+		.hdr.operation = ZUFS_OP_SYNC,
+		.zus_ii = ZUII(inode)->zus_ii,
+		.offset = offset,
+		.length = len,
+		.flags = ZUFS_SF_DONTNEED,
+	};
+
+	return zufc_dispatch(ZUF_ROOT(SBI(sb)), &ioc_range.hdr, NULL, 0);
+}
+
+/* FIXME: There is a pending patch from Jan Karta to export generic_fadvise.
+ * until then duplicate here what we need
+ */
+#include <linux/backing-dev.h>
+
+static int _generic_fadvise(struct file *file, loff_t offset, loff_t len,
+			    int advise)
+{
+	struct backing_dev_info *bdi = inode_to_bdi(file_inode(file));
+
+	switch (advise) {
+	case POSIX_FADV_NORMAL:
+		file->f_ra.ra_pages = bdi->ra_pages;
+		spin_lock(&file->f_lock);
+		file->f_mode &= ~FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
+		break;
+	case POSIX_FADV_RANDOM:
+		spin_lock(&file->f_lock);
+		file->f_mode |= FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
+		break;
+	case POSIX_FADV_SEQUENTIAL:
+		file->f_ra.ra_pages = bdi->ra_pages * 2;
+		spin_lock(&file->f_lock);
+		file->f_mode &= ~FMODE_RANDOM;
+		spin_unlock(&file->f_lock);
+		break;
+	case POSIX_FADV_NOREUSE:
+		break;
+	}
+
+	return 0;
+}
+
+int zuf_rw_fadvise(struct super_block *sb, struct file *file,
+		   loff_t offset, loff_t len, int advise, bool rand)
+{
+	switch (advise) {
+	case POSIX_FADV_WILLNEED:
+		return _fadv_willneed(sb, file_inode(file), offset, len, rand);
+	case POSIX_FADV_DONTNEED:
+		return _fadv_dontneed(sb, file_inode(file), offset, len);
+
+	case POSIX_FADV_SEQUENTIAL:
+	case POSIX_FADV_NORMAL:
+	case POSIX_FADV_RANDOM:
+	case POSIX_FADV_NOREUSE:
+		return _generic_fadvise(file, offset, len, advise);
+	default:
+		zuf_warn("Unknown advise %d\n", advise);
+		return -EINVAL;
+	}
+	return -EINVAL;
+}
+
 /* ~~~~ iom_dec.c ~~~ */
 /* for now here (at rw.c) looks logical */
 
