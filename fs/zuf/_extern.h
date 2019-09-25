@@ -110,6 +110,9 @@ int _zufs_IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode,
 void _zufs_IO_put_multy(struct zuf_sb_info *sbi, struct inode *inode,
 			struct _io_gb_multy *io_gb);
 int zuf_rw_fallocate(struct inode *inode, uint mode, loff_t offset, loff_t len);
+int zuf_rw_fadvise(struct super_block *sb, struct file *file,
+		   loff_t offset, loff_t len, int advise, bool rand);
+
 int zuf_iom_execute_sync(struct super_block *sb, struct inode *inode,
 			 __u64 *iom_e, uint iom_n);
 int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
