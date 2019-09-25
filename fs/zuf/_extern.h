@@ -43,6 +43,9 @@ int zufc_dispatch(struct zuf_root_info *zri, struct zufs_ioc_hdr *hdr,
 	zuf_dispatch_init(&zdo, hdr, pages, nump);
 	return __zufc_dispatch(zri, &zdo);
 }
+int zufc_pigy_put(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo,
+		  struct zufs_ioc_IO *io, uint iom_n, ulong *bns, bool do_now);
+void zufc_goose_all_zts(struct zuf_root_info *zri, struct inode *inode);
 
 /* zuf-root.c */
 int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs);
@@ -91,6 +94,25 @@ int zuf_remove_dentry(struct inode *dir, struct qstr *str, struct inode *inode);
 /* symlink.c */
 uint zuf_prepare_symname(struct zufs_ioc_new_inode *ioc_new_inode,
 			const char *symname, ulong len, struct page *pages[2]);
+
+/* rw.c */
+int zuf_rw_read_page(struct zuf_sb_info *sbi, struct inode *inode,
+		     struct page *page, u64 filepos);
+ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
+			 struct kiocb *kiocb, struct iov_iter *ii);
+ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
+			  struct kiocb *kiocb, struct iov_iter *ii);
+int _zufs_IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode,
+		       loff_t pos, ulong len, struct _io_gb_multy *io_gb);
+void _zufs_IO_put_multy(struct zuf_sb_info *sbi, struct inode *inode,
+			struct _io_gb_multy *io_gb);
+int zuf_rw_fallocate(struct inode *inode, uint mode, loff_t offset, loff_t len);
+int zuf_iom_execute_sync(struct super_block *sb, struct inode *inode,
+			 __u64 *iom_e, uint iom_n);
+int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
+			 __u64 *iom_e_user, uint iom_n);
+int zuf_rw_file_range_compare(struct inode *i_in, loff_t pos_in,
+			      struct inode *i_out, loff_t pos_out, loff_t len);
 
 /* t1.c */
 int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);

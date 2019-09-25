@@ -25,6 +25,20 @@
 #include "relay.h"
 
 enum { INITIAL_ZT_CHANNELS = 3 };
+#define _ZT_MAX_PIGY_PUT \
+	((ZUS_API_MAP_MAX_PAGES * sizeof(__u64) + \
+	  sizeof(struct zufs_ioc_IO)) * INITIAL_ZT_CHANNELS)
+
+enum { PG0 = 0, PG1 = 1, PG2 = 2, PG3 = 3, PG4 = 4, PG5 = 5 };
+struct __pigi_put_it {
+	void *buff;
+	void *waiter;
+	uint s; /* total encoded bytes */
+	uint last; /* So we can update last zufs_ioc_hdr->flags */
+	bool needs_goosing;
+	ulong inodes[PG5 + 1];
+	uint ic;
+};
 
 struct zufc_thread {
 	struct zuf_special_file hdr;
@@ -40,6 +54,12 @@ struct zufc_thread {
 
 	/* Next operation*/
 	struct zuf_dispatch_op *zdo;
+
+	/* Secondary chans point to the 0-channel's
+	 * pigi_put_chan0
+	 */
+	struct __pigi_put_it pigi_put_chan0;
+	struct __pigi_put_it *pigi_put;
 };
 
 struct zuf_threads_pool {
@@ -76,7 +96,14 @@ const char *zuf_op_name(enum e_zufs_operation op)
 		CASE_ENUM_NAME(ZUFS_OP_RENAME);
 		CASE_ENUM_NAME(ZUFS_OP_READDIR);
 
+		CASE_ENUM_NAME(ZUFS_OP_READ);
+		CASE_ENUM_NAME(ZUFS_OP_PRE_READ);
+		CASE_ENUM_NAME(ZUFS_OP_WRITE);
 		CASE_ENUM_NAME(ZUFS_OP_SETATTR);
+
+		CASE_ENUM_NAME(ZUFS_OP_GET_MULTY);
+		CASE_ENUM_NAME(ZUFS_OP_PUT_MULTY);
+		CASE_ENUM_NAME(ZUFS_OP_NOOP);
 	case ZUFS_OP_MAX_OPT:
 	default:
 		return "UNKNOWN";
@@ -543,6 +570,238 @@ static void _prep_header_size_op(struct zufs_ioc_hdr *hdr,
 	hdr->err = err;
 }
 
+/* ~~~~~ pigi_put logic ~~~~~ */
+struct _goose_waiter {
+	struct kref kref;
+	struct zuf_root_info *zri;
+	ulong inode; /* We use the inode address as a unique tag */
+};
+
+static void _last_goose(struct kref *kref)
+{
+	struct _goose_waiter *gw = container_of(kref, typeof(*gw), kref);
+
+	wake_up_var(&gw->kref);
+}
+
+static void _goose_put(struct _goose_waiter *gw)
+{
+	kref_put(&gw->kref, _last_goose);
+}
+
+static void _goose_get(struct _goose_waiter *gw)
+{
+	kref_get(&gw->kref);
+}
+
+static void _goose_wait(struct _goose_waiter *gw)
+{
+	wait_var_event(&gw->kref, !kref_read(&gw->kref));
+}
+
+static void _pigy_put_encode(struct zufs_ioc_IO *io,
+			     struct zufs_ioc_IO *io_user, ulong *bns)
+{
+	uint i;
+
+	*io_user = *io;
+	for (i = 0; i < io->ziom.iom_n; ++i)
+		_zufs_iom_enc_bn(&io_user->ziom.iom_e[i], bns[i], 0);
+
+	io_user->hdr.in_len = _ioc_IO_size(io->ziom.iom_n);
+}
+
+static void pigy_put_dh(struct zuf_dispatch_op *zdo, void *pzt, void *parg)
+{
+	struct zufs_ioc_IO *io = container_of(zdo->hdr, typeof(*io), hdr);
+	struct zufs_ioc_IO *io_user = parg;
+
+	_pigy_put_encode(io, io_user, zdo->bns);
+}
+
+static int _pigy_put_now(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
+{
+	int err;
+
+	zdo->dh = pigy_put_dh;
+
+	err = __zufc_dispatch(zri, zdo);
+	if (unlikely(err == -EZUFS_RETRY)) {
+		zuf_err("Unexpected ZUS return => %d\n", err);
+		err = -EIO;
+	}
+	return err;
+}
+
+int zufc_pigy_put(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo,
+		  struct zufs_ioc_IO *io, uint iom_n, ulong *bns, bool do_now)
+{
+	struct zufc_thread *zt;
+	struct zufs_ioc_IO *io_user;
+	uint pigi_put_s;
+	int cpu;
+
+	io->hdr.operation = ZUFS_OP_PUT_MULTY;
+	io->hdr.out_len = 0;		/* No returns from put */
+	io->ret_flags = 0;
+	io->ziom.iom_n = iom_n;
+	zdo->bns = bns;
+
+	pigi_put_s = _ioc_IO_size(iom_n);
+
+	/* FIXME: Pedantic check remove please */
+	if (WARN_ON(zdo->__locked_zt && !do_now))
+		do_now = true;
+
+	cpu = get_cpu();
+
+	zt = _zt_from_cpu(zri, cpu, 0);
+	if (do_now || (zt->pigi_put->s + pigi_put_s > _ZT_MAX_PIGY_PUT) ||
+	    (zt->pigi_put->ic > PG5)) {
+		put_cpu();
+
+		/* NOTE: pigy_put buffer is full, We dispatch a put NOW
+		 * which will also take with it the full pigy_put buffer.
+		 * At the server the pigy_put will be done first then this
+		 * one, so order of puts is preserved, not that it matters
+		 */
+		if (!do_now)
+			zuf_dbg_perf(
+				"[%ld] iom_n=0x%x zt->pigi_put->s=0x%x + 0x%x > 0x%lx ic=%d\n",
+				zdo->inode->i_ino, iom_n, zt->pigi_put->s,
+				pigi_put_s, _ZT_MAX_PIGY_PUT,
+				zt->pigi_put->ic++);
+
+		return _pigy_put_now(zri, zdo);
+	}
+
+	/* Mark last one as has more */
+	if (zt->pigi_put->s) {
+		io_user = zt->pigi_put->buff + zt->pigi_put->last;
+		io_user->hdr.flags |= ZUFS_H_HAS_PIGY_PUT;
+	}
+
+	io_user = zt->pigi_put->buff + zt->pigi_put->s;
+	_pigy_put_encode(io, io_user, bns);
+	zt->pigi_put->last = zt->pigi_put->s;
+	zt->pigi_put->s += pigi_put_s;
+	zt->pigi_put->inodes[zt->pigi_put->ic++] = (ulong)zdo->inode;
+
+	put_cpu();
+	return 0;
+}
+
+/* Add the pigy_put accumulated buff to current command
+ * Always runs in the context of a ZT
+ */
+static void _pigy_put_add_to_ioc(struct zuf_root_info *zri,
+				 struct zufc_thread *zt)
+{
+	struct zufs_ioc_hdr *hdr = zt->opt_buff;
+	struct __pigi_put_it *pigi = zt->pigi_put;
+
+	if (unlikely(!pigi->s))
+		return;
+
+	if (unlikely(pigi->s + hdr->in_len > zt->max_zt_command)) {
+		zuf_err("!!! Should not pigi_put->s(%d) + in_len(%d) > max_zt_command(%ld)\n",
+			pigi->s, hdr->in_len, zt->max_zt_command);
+		/*TODO we must check at init time that max_zt_command not too
+		 * small
+		 */
+		return;
+	}
+
+	memcpy((void *)hdr + hdr->in_len, pigi->buff, pigi->s);
+	hdr->flags |= ZUFS_H_HAS_PIGY_PUT;
+	pigi->s = pigi->last = 0;
+	pigi->ic = 0;
+	/* for every 3 channels */
+	pigi->inodes[PG0] = pigi->inodes[PG1] = pigi->inodes[PG2] = 0;
+	pigi->inodes[PG3] = pigi->inodes[PG4] = pigi->inodes[PG5] = 0;
+}
+
+static void _goose_prep(struct zuf_root_info *zri,
+			struct zufc_thread *zt)
+{
+	_prep_header_size_op(zt->opt_buff, ZUFS_OP_NOOP, 0);
+	_pigy_put_add_to_ioc(zri, zt);
+
+	zt->pigi_put->needs_goosing = false;
+}
+
+static inline bool _zt_pigi_has_inode(struct __pigi_put_it *pigi,
+				      ulong inode)
+{
+	return	pigi->ic &&
+		((pigi->inodes[PG0] == inode) ||
+		 (pigi->inodes[PG1] == inode) ||
+		 (pigi->inodes[PG2] == inode) ||
+		 (pigi->inodes[PG3] == inode) ||
+		 (pigi->inodes[PG4] == inode) ||
+		 (pigi->inodes[PG5] == inode));
+}
+
+static void _goose_one(void *info)
+{
+	struct _goose_waiter *gw = info;
+	struct zuf_root_info *zri = gw->zri;
+	struct zufc_thread *zt;
+	int cpu = smp_processor_id();
+	uint c;
+
+	/* Look for least busy channel. All busy we are left with zt0 */
+	for (c = INITIAL_ZT_CHANNELS; c; --c) {
+		zt = _zt_from_cpu(zri, cpu, c - 1);
+		if (unlikely(!(zt && zt->hdr.file)))
+			return; /* We are crashing */
+
+		if (!zt->pigi_put->s || zt->pigi_put->needs_goosing)
+			return; /* this cpu is goose empty */
+
+		if (!_zt_pigi_has_inode(zt->pigi_put, gw->inode))
+			return;
+		if (!zt->zdo)
+			break;
+	}
+
+	/* Tell them to ... */
+	zt->pigi_put->needs_goosing = true;
+	_goose_get(gw);
+	zt->pigi_put->waiter = gw;
+	if (!zt->zdo)
+		relay_fss_wakeup(&zt->relay);
+}
+
+/* NOTE: @inode must not be NULL */
+void zufc_goose_all_zts(struct zuf_root_info *zri, struct inode *inode)
+{
+	struct _goose_waiter gw;
+
+	if (!S_ISREG(inode->i_mode) || !(inode->i_size || inode->i_blocks))
+		return;
+
+	/* No point in two goosers fighting we are goosing for everyone
+	 * This protects that only one zt->pigi_put->waiter at a time
+	 */
+	mutex_lock(&zri->sbl_lock);
+
+	gw.zri = zri;
+	kref_init(&gw.kref);
+	gw.inode = (ulong)inode;
+
+	on_each_cpu(_goose_one, &gw, true);
+
+	if (kref_read(&gw.kref) == 1)
+		goto out;
+
+	_goose_put(&gw); /* put kref_init's 1 */
+	_goose_wait(&gw);
+
+out:
+	mutex_unlock(&zri->sbl_lock);
+}
+
 /* ~~~~~ ZT thread operations ~~~~~ */
 
 static int _zu_init(struct file *file, void *parg)
@@ -591,6 +850,24 @@ static int _zu_init(struct file *file, void *parg)
 		goto out;
 	}
 
+	if (zt->chan == 0) {
+		zt->pigi_put = &zt->pigi_put_chan0;
+
+		zt->pigi_put->buff = vmalloc(_ZT_MAX_PIGY_PUT);
+		if (unlikely(!zt->pigi_put->buff)) {
+			vfree(zt->opt_buff);
+			zi_init.hdr.err = -ENOMEM;
+			goto out;
+		}
+		zt->pigi_put->needs_goosing = false;
+		zt->pigi_put->last = zt->pigi_put->s = 0;
+	} else {
+		struct zufc_thread *zt0;
+
+		zt0 = _zt_from_cpu(ZRI(file->f_inode->i_sb), cpu, 0);
+		zt->pigi_put = &zt0->pigi_put_chan0;
+	}
+
 	file->private_data = &zt->hdr;
 out:
 	err = copy_to_user(parg, &zi_init, sizeof(zi_init));
@@ -624,6 +901,9 @@ static void zufc_zt_release(struct file *file)
 		relay_app_wakeup(&zt->relay);
 		msleep(1000); /* crap */
 	}
+
+	if (zt->chan == 0)
+		vfree(zt->pigi_put->buff);
 
 	vfree(zt->opt_buff);
 	memset(zt, 0, sizeof(*zt));
@@ -706,9 +986,25 @@ static int _copy_outputs(struct zufc_thread *zt, void *arg)
 	}
 }
 
+static bool _need_channel_lock(struct zufc_thread *zt)
+{
+	struct zufs_ioc_IO *ret_io = zt->opt_buff;
+
+	/* Only ZUF_GET_MULTY is allowed channel locking
+	 * because it absolutely must and I truest the code.
+	 * If You need a new channel locking command come talk
+	 * to me first.
+	 */
+	return	(ret_io->hdr.err == 0) &&
+		(ret_io->hdr.operation == ZUFS_OP_GET_MULTY) &&
+		(ret_io->ret_flags & ZUFS_RET_LOCKED_PUT) &&
+		(ret_io->ziom.iom_n != 0);
+}
+
 static int _zu_wait(struct file *file, void *parg)
 {
 	struct zufc_thread *zt;
+	struct zufs_ioc_hdr *user_hdr;
 	bool __chan_is_locked = false;
 	int err;
 
@@ -729,6 +1025,10 @@ static int _zu_wait(struct file *file, void *parg)
 		err = -EINVAL;
 		goto err;
 	}
+
+	user_hdr = zt->opt_buff;
+	if (user_hdr->flags & ZUFS_H_HAS_PIGY_PUT)
+		user_hdr->flags &= ~ZUFS_H_HAS_PIGY_PUT;
 
 	if (relay_is_app_waiting(&zt->relay)) {
 		if (unlikely(!zt->zdo)) {
@@ -751,11 +1051,27 @@ static int _zu_wait(struct file *file, void *parg)
 
 		_unmap_pages(zt, zt->zdo->pages, zt->zdo->nump);
 
-		zt->zdo = NULL;
+		if (unlikely(!err && _need_channel_lock(zt))) {
+			zt->zdo->__locked_zt = zt;
+			__chan_is_locked = true;
+		} else {
+			zt->zdo = NULL;
+		}
 		if (unlikely(err)) /* _copy_outputs returned an err */
 			goto err;
 
 		relay_app_wakeup(&zt->relay);
+	}
+
+	if (zt->pigi_put->needs_goosing && !__chan_is_locked) {
+		/* go do a cycle and come back */
+		_goose_prep(ZRI(file->f_inode->i_sb), zt);
+		return 0;
+	}
+
+	if (zt->pigi_put->waiter) {
+		_goose_put(zt->pigi_put->waiter);
+		zt->pigi_put->waiter = NULL;
 	}
 
 	err = __relay_fss_wait(&zt->relay, __chan_is_locked);
@@ -770,8 +1086,16 @@ static int _zu_wait(struct file *file, void *parg)
 		 * we should have a bit set in zt->zdo->hdr set per operation.
 		 * TODO: Why this does not work?
 		 */
-		_map_pages(zt, zt->zdo->pages, zt->zdo->nump, 0);
+		_map_pages(zt, zt->zdo->pages, zt->zdo->nump,
+			   zt->zdo->hdr->operation == ZUFS_OP_WRITE);
+		if (zt->pigi_put->s)
+			_pigy_put_add_to_ioc(ZRI(file->f_inode->i_sb), zt);
 	} else {
+		if (zt->pigi_put->needs_goosing) {
+			_goose_prep(ZRI(file->f_inode->i_sb), zt);
+			return 0;
+		}
+
 		/* This Means we were released by _zu_break */
 		zuf_dbg_zus("_zu_break? => %d\n", err);
 		_prep_header_size_op(zt->opt_buff, ZUFS_OP_BREAK, err);
@@ -953,6 +1277,30 @@ static inline struct zu_exec_buff *_ebuff_from_file(struct file *file)
 	return ebuff;
 }
 
+static int _ebuff_bounds_check(struct zu_exec_buff *ebuff, ulong buff,
+			       struct zufs_iomap *ziom,
+			       struct zufs_iomap *user_ziom, void *ziom_end)
+{
+	size_t iom_max_bytes = ziom_end - (void *)&user_ziom->iom_e;
+
+	if (buff != ebuff->vma->vm_start ||
+	    ebuff->vma->vm_end < buff + iom_max_bytes) {
+		WARN_ON_ONCE(1);
+		zuf_err("Executing out off bound vm_start=0x%lx vm_end=0x%lx buff=0x%lx buff_end=0x%lx\n",
+			ebuff->vma->vm_start, ebuff->vma->vm_end, buff,
+			buff + iom_max_bytes);
+		return -EINVAL;
+	}
+
+	if (unlikely((iom_max_bytes / sizeof(__u64) < ziom->iom_max)))
+		return -EINVAL;
+
+	if (unlikely(ziom->iom_max < ziom->iom_n))
+		return -EINVAL;
+
+	return 0;
+}
+
 static int _zu_ebuff_alloc(struct file *file, void *arg)
 {
 	struct zufs_ioc_alloc_buffer ioc_alloc;
@@ -1003,6 +1351,52 @@ static void zufc_ebuff_release(struct file *file)
 	ebuff->hdr.file = NULL; /* for none-dbg Kernels && use-after-free */
 	kfree(ebuff);
 }
+
+static int _zu_iomap_exec(struct file *file, void *arg)
+{
+	struct zuf_root_info *zri = ZRI(file->f_inode->i_sb);
+	struct zu_exec_buff *ebuff = _ebuff_from_file(file);
+	struct zufs_ioc_iomap_exec ioc_iomap;
+	struct zufs_ioc_iomap_exec *user_iomap;
+
+	struct super_block *sb;
+	int err;
+
+	if (unlikely(!ebuff))
+		return -EINVAL;
+
+	user_iomap = ebuff->opt_buff;
+	/* do all checks on a kernel copy so malicious Server cannot
+	 * crash the Kernel
+	 */
+	ioc_iomap = *user_iomap;
+
+	err = _ebuff_bounds_check(ebuff, (ulong)arg, &ioc_iomap.ziom,
+				  &user_iomap->ziom,
+				  ebuff->opt_buff + ebuff->alloc_size);
+	if (unlikely(err)) {
+		zuf_err("illegal iomap: iom_max=%u iom_n=%u\n",
+			ioc_iomap.ziom.iom_max, ioc_iomap.ziom.iom_n);
+		return err;
+	}
+
+	/* The ID of the super block received in mount */
+	sb = zuf_sb_from_id(zri, ioc_iomap.sb_id, ioc_iomap.zus_sbi);
+	if (unlikely(!sb))
+		return -EINVAL;
+
+	if (ioc_iomap.wait_for_done)
+		err = zuf_iom_execute_sync(sb, NULL, user_iomap->ziom.iom_e,
+					   ioc_iomap.ziom.iom_n);
+	else
+		err =  zuf_iom_execute_async(sb, ioc_iomap.ziom.iomb,
+					     user_iomap->ziom.iom_e,
+					     ioc_iomap.ziom.iom_n);
+
+	user_iomap->hdr.err = err;
+	zuf_dbg_core("OUT => %d\n", err);
+	return 0; /* report err at hdr, but the command was executed */
+};
 
 /* ~~~~ ioctl & release handlers ~~~~ */
 static int _zu_register_fs(struct file *file, void *parg)
@@ -1069,6 +1463,8 @@ long zufc_ioctl(struct file *file, unsigned int cmd, ulong arg)
 		return _zu_wait(file, parg);
 	case ZU_IOC_ALLOC_BUFFER:
 		return _zu_ebuff_alloc(file, parg);
+	case ZU_IOC_IOMAP_EXEC:
+		return _zu_iomap_exec(file, parg);
 	case ZU_IOC_PRIVATE_MOUNT:
 		return _zu_private_mounter(file, parg);
 	case ZU_IOC_BREAK_ALL:

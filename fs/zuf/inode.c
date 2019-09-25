@@ -287,6 +287,8 @@ void zuf_evict_inode(struct inode *inode)
 
 		zuf_w_lock(zii);
 
+		zufc_goose_all_zts(ZUF_ROOT(SBI(sb)), inode);
+
 		zuf_evict_dispatch(sb, zii->zus_ii, ZUFS_OP_FREE_INODE, 0);
 
 		inode->i_mtime = inode->i_ctime = current_time(inode);
@@ -297,6 +299,8 @@ void zuf_evict_inode(struct inode *inode)
 		zuf_dbg_vfs("[%ld] inode is going down?\n", inode->i_ino);
 
 		zuf_smw_lock(zii);
+
+		zufc_goose_all_zts(ZUF_ROOT(SBI(sb)), inode);
 
 		zuf_evict_dispatch(sb, zii->zus_ii, ZUFS_OP_EVICT_INODE, 0);
 
@@ -585,5 +589,14 @@ void zuf_set_inode_flags(struct inode *inode, struct zus_inode *zi)
 		inode_has_no_xattr(inode);
 }
 
+/* direct_IO is not called. We set an empty one so open(O_DIRECT) will be happy
+ */
+static ssize_t zuf_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
+{
+	WARN_ON(1);
+	return 0;
+}
+
 const struct address_space_operations zuf_aops = {
+	.direct_IO		= zuf_direct_IO,
 };
