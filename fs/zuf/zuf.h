@@ -402,6 +402,13 @@ static inline int zuf_flt_to_err(vm_fault_t flt)
 	return -EACCES;
 }
 
+struct _io_gb_multy {
+	struct zuf_dispatch_op zdo;
+	struct zufs_ioc_IO IO;
+	ulong iom_n;
+	ulong *bns;
+};
+
 /* Keep this include last thing in file */
 #include "_extern.h"
 
