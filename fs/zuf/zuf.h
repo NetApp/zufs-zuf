@@ -315,7 +315,6 @@ static inline void ZUF_CHECK_I_W_LOCK(struct inode *inode)
 		up_write(&inode->i_rwsem);
 #endif
 }
-
 static inline void zuf_xar_lock(struct zuf_inode_info *zii)
 {
 	down_read(&zii->xa_rwsem);
@@ -347,7 +346,7 @@ struct zuf_acl {
 	__le16	tag;
 	__le16	perm;
 	__le32	id;
-} __packed;
+};
 
 enum big_alloc_type { ba_stack, ba_8k, ba_vmalloc };
 #define S_8K (1024UL * 8)

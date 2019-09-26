@@ -74,7 +74,8 @@ static vm_fault_t t1_fault(struct vm_fault *vmf, enum page_entry_size pe_size)
 	case PE_SIZE_PTE:
 		zuf_err("[%ld] PTE fault not expected pgoff=0x%lx addr=0x%lx\n",
 			inode->i_ino, vmf->pgoff, addr);
-		/* fall through do PMD insert anyway */
+		/* Always PMD insert 2M chunks */
+		/* fall through */
 	case PE_SIZE_PMD:
 		bn = linear_page_index(vma, addr & PMD_MASK);
 		pfn = md_pfn(z_pmem->md, bn);

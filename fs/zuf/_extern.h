@@ -60,18 +60,15 @@ void zuf_destroy_inodecache(void);
 int zuf_8k_cache_init(void);
 void zuf_8k_cache_fini(void);
 
-void zuf_sync_inc(struct inode *inode);
-void zuf_sync_dec(struct inode *inode, ulong write_unmapped);
-
 struct dentry *zuf_mount(struct file_system_type *fs_type, int flags,
 			 const char *dev_name, void *data);
-
-struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
-				   struct zus_sb_info *zus_sbi);
-
 int zuf_private_mount(struct zuf_root_info *zri, struct register_fs_info *rfi,
 		      struct zufs_mount_info *zmi, struct super_block **sb_out);
 int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb);
+struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
+				   struct zus_sb_info *zus_sbi);
+void zuf_sync_inc(struct inode *inode);
+void zuf_sync_dec(struct inode *inode, ulong write_unmapped);
 
 /* file.c */
 int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync);
@@ -118,6 +115,7 @@ void _zufs_IO_put_multy(struct zuf_sb_info *sbi, struct inode *inode,
 int zuf_rw_fallocate(struct inode *inode, uint mode, loff_t offset, loff_t len);
 int zuf_rw_fadvise(struct super_block *sb, struct file *file,
 		   loff_t offset, loff_t len, int advise, bool rand);
+
 int zuf_iom_execute_sync(struct super_block *sb, struct inode *inode,
 			 __u64 *iom_e, uint iom_n);
 int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,

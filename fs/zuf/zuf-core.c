@@ -1502,6 +1502,7 @@ int zufc_release(struct inode *inode, struct file *file)
 		return 0;
 	case zlfs_e_private_mount:
 		_zu_private_mounter_release(file);
+		return 0;
 	case zlfs_e_pmem:
 		/* NOTHING to clean for pmem file yet */
 		/* zuf_pmem_release(file);*/

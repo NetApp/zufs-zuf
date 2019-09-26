@@ -237,7 +237,6 @@ static int zuf_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 static int zuf_flush(struct file *file, fl_owner_t id)
 {
 	zuf_dbg_vfs("[%ld]\n", file->f_inode->i_ino);
-
 	return 0;
 }
 
@@ -709,17 +708,6 @@ static ssize_t zuf_copy_file_range(struct file *file_in, loff_t pos_in,
 	return ret ?: len;
 }
 
-/* ZUFS:
- * make sure we clean up the resources consumed by zufs_init()
- */
-static int zuf_file_release(struct inode *inode, struct file *filp)
-{
-	if (unlikely(filp->private_data))
-		zuf_err("not yet\n");
-
-	return 0;
-}
-
 static ssize_t zuf_read_iter(struct kiocb *kiocb, struct iov_iter *ii)
 {
 	struct inode *inode = file_inode(kiocb->ki_filp);
@@ -816,7 +804,6 @@ const struct file_operations zuf_file_operations = {
 	.fsync			= zuf_fsync,
 	.llseek			= zuf_llseek,
 	.flush			= zuf_flush,
-	.release		= zuf_file_release,
 	.fallocate		= zuf_fallocate,
 	.copy_file_range	= zuf_copy_file_range,
 	.remap_file_range	= zuf_clone_file_range,
