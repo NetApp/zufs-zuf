@@ -1211,8 +1211,8 @@ channel_busy:
 	}
 
 	/* lock app to this cpu while waiting */
-	cpumask_copy(&zt->relay.cpus_allowed, &app->cpus_allowed);
-	cpumask_copy(&app->cpus_allowed,  cpumask_of(smp_processor_id()));
+	cpumask_copy(&zt->relay.cpus_allowed, &app->cpus_mask);
+	cpumask_copy(&app->cpus_mask,  cpumask_of(smp_processor_id()));
 
 	zt->zdo = zdo;
 
@@ -1235,7 +1235,7 @@ has_channel:
 	/* __locked_zt must be kept on same cpu */
 	if (!zdo->__locked_zt)
 		/* restore cpu affinity after wakeup */
-		cpumask_copy(&app->cpus_allowed, &zt->relay.cpus_allowed);
+		cpumask_copy(&app->cpus_mask, &zt->relay.cpus_allowed);
 
 	DEBUG_CPU_SWITCH(cpu);
 
