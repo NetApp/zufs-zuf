@@ -708,6 +708,10 @@ static ssize_t zuf_copy_file_range(struct file *file_in, loff_t pos_in,
 	zuf_dbg_vfs("ino-in=%ld ino-out=%ld pos_in=0x%llx pos_out=0x%llx length=0x%lx\n",
 		    src_inode->i_ino, dst_inode->i_ino, pos_in, pos_out, len);
 
+	if (src_inode->i_sb != dst_inode->i_sb)
+		return generic_copy_file_range(file_in, pos_in, file_out,
+					       pos_out, len, flags);
+
 	ret = zuf_clone_file_range(file_in, pos_in, file_out, pos_out, len,
 				   REMAP_FILE_ADVISORY);
 
