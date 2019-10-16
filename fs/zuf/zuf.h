@@ -66,7 +66,7 @@ struct zuf_root_info {
 	} sbl;
 	struct mutex sbl_lock;
 
-	ulong next_ino;
+	atomic_t next_ino;
 
 	/* The definition of _ztp is private to zuf-core.c */
 	struct zuf_threads_pool *_ztp;
