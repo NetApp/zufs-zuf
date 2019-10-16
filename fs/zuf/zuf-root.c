@@ -353,7 +353,7 @@ static int zufr_tmpfile(struct inode *dir, struct dentry *dentry, umode_t mode)
 	inode->i_flags = S_DAX;
 	mode = (mode & ~S_IFREG) | S_IFCHR; /* change file type to char */
 
-	inode->i_ino = ++zri->next_ino; /* none atomic only one mount thread */
+	inode->i_ino = atomic_inc_return(&zri->next_ino);
 	inode->i_blocks = inode->i_size = 0;
 	inode->i_ctime = inode->i_mtime = current_time(inode);
 	inode->i_atime = inode->i_ctime;
@@ -448,6 +448,8 @@ static int zufr_fill_super(struct super_block *sb, void *data, int silent)
 	err = zufc_zts_init(zri);
 	if (unlikely(err))
 		return err; /* put will be called we have a root */
+
+	atomic_set(&zri->next_ino, 0);
 
 	return 0;
 }
