@@ -30,7 +30,7 @@ static int _cow_private_page(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (unlikely(err && err != -EINTR)) {
 		zuf_err("[%ld] read_page failed bn=0x%lx address=0x%lx => %d\n",
 			inode->i_ino, vmf->pgoff, vmf->address, err);
-		/* FIXME: Probably return VM_FAULT_SIGBUS */
+		return VM_FAULT_SIGBUS;
 	}
 
 	/*HACK: This is an hack since Kernel v4.7 where a VM_FAULT_LOCKED with
