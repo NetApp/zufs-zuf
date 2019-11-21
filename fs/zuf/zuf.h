@@ -403,12 +403,18 @@ typedef int (*overflow_handler)(struct zuf_dispatch_op *zdo, void *parg,
 				ulong zt_max_bytes);
 typedef void (*dispatch_handler)(struct zuf_dispatch_op *zdo, void *pzt,
 				void *parg);
+enum {
+	/* These are bit flags*/
+	EZDO_M_NONE_INTR = 0x1,
+};
+
 struct zuf_dispatch_op {
 	struct zufs_ioc_hdr *hdr;
 	union {
 		struct page **pages;
 		ulong *bns;
 	};
+	uint mode;
 	uint nump;
 	overflow_handler oh;
 	dispatch_handler dh;

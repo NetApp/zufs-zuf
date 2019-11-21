@@ -635,6 +635,7 @@ static int _pigy_put_now(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
 	int err;
 
 	zdo->dh = pigy_put_dh;
+	zdo->mode |= EZDO_M_NONE_INTR;
 
 	err = __zufc_dispatch(zri, zdo);
 	if (unlikely(err == -EZUFS_RETRY)) {
@@ -1203,7 +1204,8 @@ channel_busy:
 		zuf_dbg_err("[%d] can this be\n", cpu);
 		/* FIXME: Do something much smarter */
 		msleep(10);
-		if (signal_pending(get_current())) {
+		if (!(zdo->mode & EZDO_M_NONE_INTR) &&
+		    signal_pending(get_current())) {
 			zuf_dbg_err("[%d] => EINTR\n", cpu);
 			return -EINTR;
 		}
