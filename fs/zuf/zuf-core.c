@@ -77,9 +77,10 @@ struct zuf_threads_pool {
 };
 
 /* ~~~~ some helpers ~~~~ */
+#define CASE_ENUM_NAME(e) case e: return #e
+
 const char *zuf_op_name(enum e_zufs_operation op)
 {
-#define CASE_ENUM_NAME(e) case e: return #e
 	switch  (op) {
 		CASE_ENUM_NAME(ZUFS_OP_NULL);
 		CASE_ENUM_NAME(ZUFS_OP_BREAK);
@@ -116,6 +117,20 @@ const char *zuf_op_name(enum e_zufs_operation op)
 		CASE_ENUM_NAME(ZUFS_OP_PUT_MULTY);
 		CASE_ENUM_NAME(ZUFS_OP_NOOP);
 	case ZUFS_OP_MAX_OPT:
+	default:
+		return "UNKNOWN";
+	}
+}
+
+const char *zuf_mount_op_name(enum e_mount_operation op)
+{
+	switch  (op) {
+		CASE_ENUM_NAME(ZUFS_M_MOUNT);
+		CASE_ENUM_NAME(ZUFS_M_UMOUNT);
+		CASE_ENUM_NAME(ZUFS_M_REMOUNT);
+		CASE_ENUM_NAME(ZUFS_M_DDBG_RD);
+		CASE_ENUM_NAME(ZUFS_M_DDBG_WR);
+
 	default:
 		return "UNKNOWN";
 	}
@@ -232,7 +247,7 @@ int __zufc_dispatch_mount(struct zuf_root_info *zri,
 
 	if (zim->hdr.err > 0) {
 		zuf_err("[%s] Bad Server RC not negative => %d\n",
-			zuf_op_name(zim->hdr.operation), zim->hdr.err);
+			zuf_mount_op_name(zim->hdr.operation), zim->hdr.err);
 		zim->hdr.err = -EBADRQC;
 	}
 	return zim->hdr.err;
