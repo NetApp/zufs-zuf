@@ -384,6 +384,7 @@ static void zufr_put_super(struct super_block *sb)
 
 	zufc_zts_fini(zri);
 	_unregister_all_fses(zri);
+	kfree(zri);
 
 	zuf_info("zuf_root umount\n");
 }
