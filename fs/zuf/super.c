@@ -330,7 +330,7 @@ static void zuf_put_super(struct super_block *sb)
 			.zmi.zus_sbi = sbi->zus_sbi,
 		};
 
-		zufc_dispatch_mount(ZUF_ROOT(sbi), NULL, ZUFS_M_UMOUNT, &zim);
+		zufc_umount(ZUF_ROOT(sbi), &zim);
 		sbi->zus_sbi = NULL;
 	}
 
@@ -529,8 +529,8 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	}
 
 	/* Tell ZUS to mount an FS for us */
-	err = zufc_dispatch_mount(ZUF_ROOT(sbi), zuf_fst(sb)->zus_zfi,
-				  ZUFS_M_MOUNT, ioc_mount);
+	err = zufc_mount(ZUF_ROOT(sbi), zuf_fst(sb)->zus_zfi,
+				  ioc_mount);
 	if (unlikely(err)) {
 		zuf_err_cnd(silent, "zufc_dispatch_mount failed => %d\n", err);
 		goto error;
@@ -713,8 +713,7 @@ static int zuf_remount(struct super_block *sb, int *mntflags, char *data)
 		_sb_mwtime_now(sb, md_zdt(sbi->md));
 	}
 
-	err = zufc_dispatch_mount(ZUF_ROOT(sbi), zuf_fst(sb)->zus_zfi,
-				  ZUFS_M_REMOUNT, ioc_mount);
+	err = zufc_remount(ZUF_ROOT(sbi), ioc_mount);
 	if (unlikely(err))
 		goto fail;
 
