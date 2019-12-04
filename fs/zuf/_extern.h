@@ -29,12 +29,13 @@ int zufc_release(struct inode *inode, struct file *file);
 int zufc_mmap(struct file *file, struct vm_area_struct *vma);
 const char *zuf_op_name(enum e_zufs_operation op);
 
-int __zufc_dispatch_mount(struct zuf_root_info *zri,
-			  enum e_mount_operation op,
-			  struct zufs_ioc_mount *zim);
-int zufc_dispatch_mount(struct zuf_root_info *zri, struct zus_fs_info *zus_zfi,
-			enum e_mount_operation operation,
+int zufc_dbg_rdwr(struct zuf_root_info *zri, enum e_mount_operation op,
+		  struct zufs_ioc_mount *zim);
+int zufc_mount(struct zuf_root_info *zri, struct zus_fs_info *zus_zfi,
 			struct zufs_ioc_mount *zim);
+int zufc_umount(struct zuf_root_info *zri, struct zufs_ioc_mount *zim);
+int zufc_remount(struct zuf_root_info *zri,
+			  struct zufs_ioc_mount *zim);
 
 int __zufc_dispatch(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo);
 static inline

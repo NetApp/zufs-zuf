@@ -209,9 +209,9 @@ void zufc_zts_fini(struct zuf_root_info *zri)
 }
 
 /* ~~~~ mounting ~~~~*/
-int __zufc_dispatch_mount(struct zuf_root_info *zri,
-			  enum e_mount_operation operation,
-			  struct zufs_ioc_mount *zim)
+static int _dispatch_mount(struct zuf_root_info *zri,
+			   enum e_mount_operation operation,
+			   struct zufs_ioc_mount *zim)
 {
 	struct __mount_thread_info *zmt = &zri->_ztp->mount;
 
@@ -253,19 +253,36 @@ int __zufc_dispatch_mount(struct zuf_root_info *zri,
 	return zim->hdr.err;
 }
 
-int zufc_dispatch_mount(struct zuf_root_info *zri, struct zus_fs_info *zus_zfi,
-			enum e_mount_operation operation,
+int zufc_mount(struct zuf_root_info *zri, struct zus_fs_info *zus_zfi,
 			struct zufs_ioc_mount *zim)
 {
 	zim->hdr.out_len = sizeof(*zim);
-	zim->hdr.in_len = sizeof(*zim);
-	if (operation == ZUFS_M_MOUNT || operation == ZUFS_M_REMOUNT)
-		zim->hdr.in_len += zim->zmi.po.mount_options_len;
+	zim->hdr.in_len = sizeof(*zim) + zim->zmi.po.mount_options_len;
 	zim->zmi.zus_zfi = zus_zfi;
 	zim->zmi.num_cpu = zri->_ztp->_max_zts;
 	zim->zmi.num_channels = zri->_ztp->_max_channels;
 
-	return __zufc_dispatch_mount(zri, operation, zim);
+	return _dispatch_mount(zri, ZUFS_M_MOUNT, zim);
+}
+
+int zufc_umount(struct zuf_root_info *zri, struct zufs_ioc_mount *zim)
+{
+	zim->hdr.out_len = sizeof(*zim);
+	zim->hdr.in_len = sizeof(*zim);
+	return _dispatch_mount(zri, ZUFS_M_UMOUNT, zim);
+}
+
+int zufc_remount(struct zuf_root_info *zri, struct zufs_ioc_mount *zim)
+{
+	zim->hdr.out_len = sizeof(*zim);
+	zim->hdr.in_len = sizeof(*zim) + zim->zmi.po.mount_options_len;
+	return _dispatch_mount(zri, ZUFS_M_REMOUNT, zim);
+}
+
+int zufc_dbg_rdwr(struct zuf_root_info *zri, enum e_mount_operation op,
+		  struct zufs_ioc_mount *zim)
+{
+	return _dispatch_mount(zri, op, zim);
 }
 
 static int _zu_mount(struct file *file, void *parg)

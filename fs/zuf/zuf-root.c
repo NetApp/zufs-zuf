@@ -91,8 +91,7 @@ static ssize_t _zus_ddbg_read(struct file *file, char __user *buf, size_t len,
 	zim->zdi.id = *ppos;
 	*ppos = 0;
 
-	err = __zufc_dispatch_mount(ZRI(file->f_inode->i_sb), ZUFS_M_DDBG_RD,
-				    zim);
+	err = zufc_dbg_rdwr(ZRI(file->f_inode->i_sb), ZUFS_M_DDBG_RD, zim);
 	if (unlikely(err)) {
 		zuf_err("error dispatching contorl message => %ld\n", err);
 		goto out;
@@ -129,8 +128,7 @@ static ssize_t _zus_ddbg_write(struct file *file, const char __user *buf,
 
 	ddi.zim.hdr.in_len = sizeof(ddi);
 	ddi.zim.hdr.out_len = sizeof(ddi.zim);
-	err = __zufc_dispatch_mount(ZRI(file->f_inode->i_sb), ZUFS_M_DDBG_WR,
-				    &ddi.zim);
+	err = zufc_dbg_rdwr(ZRI(file->f_inode->i_sb), ZUFS_M_DDBG_WR, &ddi.zim);
 	if (unlikely(err)) {
 		zuf_err("error dispatching contorl message => %ld\n", err);
 		return err;
