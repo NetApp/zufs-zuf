@@ -86,10 +86,6 @@ struct multi_devices {
 #endif /*! __KERNEL__*/
 };
 
-enum md_init_flags {
-	MD_I_F_PRIVATE		= (1UL << 0),
-};
-
 static inline __u64 md_p2o(ulong bn)
 {
 	return (__u64)bn << PAGE_SHIFT;
