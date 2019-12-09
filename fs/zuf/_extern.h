@@ -119,7 +119,7 @@ int zuf_rw_fadvise(struct super_block *sb, struct file *file,
 
 int zuf_iom_execute_sync(struct super_block *sb, struct inode *inode,
 			 __u64 *iom_e, uint iom_n);
-int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
+int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_done *iomd,
 			 __u64 *iom_e_user, uint iom_n);
 int zuf_rw_file_range_compare(struct inode *i_in, loff_t pos_in,
 			      struct inode *i_out, loff_t pos_out, loff_t len);
