@@ -1080,9 +1080,93 @@ int zuf_iom_execute_sync(struct super_block *sb, struct inode *inode,
 	return err ?: (err_r ?: err_w);
 }
 
-int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_build *iomb,
+struct _async_iom_exec {
+	struct kref kref;
+	struct work_struct work;
+	struct t2_io_state rd_tis;
+	struct t2_io_state wr_tis;
+	struct _iom_exec_info iei;
+	struct zus_iomap_done *iomd;
+};
+
+void _out_of_bdev_done_thread(struct work_struct *work)
+{
+	struct _async_iom_exec *aie = container_of(work, typeof(*aie), work);
+	struct zuf_sb_info *sbi = SBI(aie->iei.sb);
+	struct zufs_ioc_iomap_done ziid = {
+		.hdr.operation = ZUFS_OP_IOM_DONE,
+		.hdr.in_len = sizeof(ziid),
+		.hdr.err = aie->rd_tis.err ?: aie->wr_tis.err,
+		.zus_sbi = sbi->zus_sbi,
+		.iomd = aie->iomd,
+	};
+	struct zuf_dispatch_op zdo;
+	int err;
+
+	zuf_dbg_t2("0x%lx\n", (ulong)ziid.iomd);
+
+	zuf_dispatch_init(&zdo, &ziid.hdr, NULL, 0);
+	zdo.mode = EZDO_M_BACK_CHAN | EZDO_M_NONE_INTR;
+
+	err = __zufc_dispatch(ZUF_ROOT(sbi), &zdo);
+	if (unlikely(err))
+		zuf_err("__zufc_dispatch => %d\n", err);
+
+	kfree(aie);
+}
+
+void _last_async_done(struct kref *kref)
+{
+	struct _async_iom_exec *aie = container_of(kref, typeof(*aie), kref);
+
+	queue_work(system_unbound_wq, &aie->work);
+}
+
+static void iom_exec_async_done(struct t2_io_state *tis, struct bio *bio,
+				bool last)
+{
+	struct _async_iom_exec *aie = tis->priv;
+
+	if (last) {
+		kref_put(&aie->kref, _last_async_done);
+		return;
+	}
+
+	t2_io_done(tis, bio, last);
+}
+
+int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_done *iomd,
 			 __u64 *iom_e_user, uint iom_n)
 {
-	zuf_err("Async IOM NOT supported Yet!!!\n");
-	return -EFAULT;
+	struct zuf_sb_info *sbi = SBI(sb);
+	struct _async_iom_exec *aie;
+	int err, err_r, err_w;
+
+	aie = kzalloc(sizeof(*aie), GFP_KERNEL);
+	if (unlikely(!aie))
+		return -ENOMEM;
+
+	aie->iei.sb = sb;
+	aie->iei.rd_tis = &aie->rd_tis;
+	aie->iei.wr_tis = &aie->wr_tis;
+	aie->iomd = iomd;
+	aie->iei.iom_e = iom_e_user;
+	aie->iei.iom_n = iom_n;
+	refcount_set(&aie->kref.refcount, 2);
+	INIT_WORK(&aie->work, _out_of_bdev_done_thread);
+
+	t2_io_begin(sbi->md, READ,  iom_exec_async_done, aie, -1, &aie->rd_tis);
+	t2_io_begin(sbi->md, WRITE, iom_exec_async_done, aie, -1, &aie->wr_tis);
+
+	err = _iom_execute_inline(&aie->iei);
+
+	err_r = t2_io_end(&aie->rd_tis, false);
+	err_w = t2_io_end(&aie->wr_tis, false);
+
+	if (!err)
+		err = err_r ? err_r : err_w;
+	if (unlikely(err && err != -EIO))
+		zuf_warn("iom_execute_async => %d %d %d\n", err, err_r, err_w);
+
+	return err;
 }

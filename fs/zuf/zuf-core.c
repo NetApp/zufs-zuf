@@ -25,7 +25,9 @@
 #include "zuf.h"
 #include "relay.h"
 
-enum { INITIAL_ZT_CHANNELS = 3 };
+enum {	INITIAL_ZT_CHANNELS = ZUFS_MAX_ZT_CHANNELS - 1,
+	BACK_CHAN_NO = INITIAL_ZT_CHANNELS - 1,
+};
 #define _ZT_MAX_PIGY_PUT \
 	((ZUS_API_MAP_MAX_PAGES * sizeof(__u64) + \
 	  sizeof(struct zufs_ioc_IO)) * INITIAL_ZT_CHANNELS)
@@ -118,6 +120,7 @@ const char *zuf_op_name(enum e_zufs_operation op)
 		CASE_ENUM_NAME(ZUFS_OP_GET_MULTY);
 		CASE_ENUM_NAME(ZUFS_OP_PUT_MULTY);
 		CASE_ENUM_NAME(ZUFS_OP_NOOP);
+		CASE_ENUM_NAME(ZUFS_OP_IOM_DONE);
 	case ZUFS_OP_MAX_OPT:
 	default:
 		return "UNKNOWN";
@@ -1185,12 +1188,12 @@ err:
 }
 
 static int _try_grab_zt_channel(struct zuf_root_info *zri, int cpu,
-				 struct zufc_thread **ztp)
+				 struct zufc_thread **ztp, uint minc, uint maxc)
 {
 	struct zufc_thread *zt;
 	int c;
 
-	for (c = 0; ; ++c) {
+	for (c = minc; c < maxc; ++c) {
 		zt = _zt_from_cpu(zri, cpu, c);
 		if (unlikely(!zt || !zt->hdr.file))
 			break;
@@ -1225,11 +1228,15 @@ int __zufc_dispatch(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
 {
 	struct task_struct *app = get_current();
 	struct zufs_ioc_hdr *hdr = zdo->hdr;
+	uint scan_b = 0, scan_e = BACK_CHAN_NO;
 	int cpu;
 	struct zufc_thread *zt;
 
 	if (unlikely(zri->state == ZUF_ROOT_SERVER_FAILED))
 		return -EIO;
+
+	if (unlikely(zdo->mode & EZDO_M_BACK_CHAN))
+		scan_b = scan_e++;
 
 	if (unlikely(hdr->out_len && !hdr->out_max)) {
 		/* TODO: Complain here and let caller code do this proper */
@@ -1253,7 +1260,7 @@ int __zufc_dispatch(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
 channel_busy:
 	cpu = get_cpu();
 
-	if (!_try_grab_zt_channel(zri, cpu, &zt)) {
+	if (!_try_grab_zt_channel(zri, cpu, &zt, scan_b, scan_e)) {
 		put_cpu();
 
 		/* If channel was grabbed then maybe a break_all is in progress
@@ -1466,7 +1473,7 @@ static int _zu_iomap_exec(struct file *file, void *arg)
 		err = zuf_iom_execute_sync(sb, NULL, user_iomap->ziom.iom_e,
 					   ioc_iomap.ziom.iom_n);
 	else
-		err =  zuf_iom_execute_async(sb, ioc_iomap.ziom.iomb,
+		err =  zuf_iom_execute_async(sb, ioc_iomap.ziom.iomd,
 					     user_iomap->ziom.iom_e,
 					     ioc_iomap.ziom.iom_n);
 

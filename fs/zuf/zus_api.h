@@ -382,7 +382,7 @@ struct zufs_ioc_pmem {
 #define ZU_IOC_GRAB_PMEM	_IOWR('Z', 14, struct zufs_ioc_pmem)
 
 /* ZT init */
-enum { ZUFS_MAX_ZT_CHANNELS = 4 };
+enum { ZUFS_MAX_ZT_CHANNELS = 5 };
 
 struct zufs_ioc_init {
 	struct zufs_ioc_hdr hdr;
@@ -475,6 +475,7 @@ enum e_zufs_operation {
 	ZUFS_OP_GET_MULTY	= 29,
 	ZUFS_OP_PUT_MULTY	= 30,
 	ZUFS_OP_NOOP		= 31,
+	ZUFS_OP_IOM_DONE	= 32,
 
 	ZUFS_OP_MAX_OPT,
 };
@@ -941,7 +942,7 @@ struct zufs_iom_unmap {
 	((sizeof(struct zufs_iom_unmap) +				\
 	  sizeof(struct zufs_iom_t2_io)) / sizeof(__u64) + sizeof(__u64))
 
-struct zus_iomap_build;
+struct zus_iomap_done;
 /* For ZUFS_OP_IOM_DONE */
 struct zufs_ioc_iomap_done {
 	struct zufs_ioc_hdr hdr;
@@ -949,12 +950,12 @@ struct zufs_ioc_iomap_done {
 	struct zus_sb_info *zus_sbi;
 
 	/* The cookie received from zufs_ioc_iomap_exec */
-	struct	zus_iomap_build *iomb;
+	struct	zus_iomap_done *iomd;
 };
 
 struct zufs_iomap {
 	/* A cookie from zus to return when execution is done */
-	struct	zus_iomap_build *iomb;
+	struct	zus_iomap_done *iomd;
 
 	__u32	iom_max;	/* num of __u64 allocated	 */
 	__u32	iom_n;		/* num of valid __u64 in iom_e	 */
