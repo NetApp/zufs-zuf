@@ -425,7 +425,8 @@ int _zufs_IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode,
 	}
 	if (unlikely(!io_gb->iom_n)) {
 		if (!io_gb->IO.ziom.iom_n) {
-			zuf_err("WANT tO SEE => %d\n", err);
+			if (err)
+				zuf_err("WANT tO SEE => %d\n", err);
 			return err;
 		} else {
 			ulong offset = pos & (PAGE_SIZE - 1);
