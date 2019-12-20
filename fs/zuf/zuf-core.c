@@ -775,6 +775,7 @@ static void _goose_one(void *info)
 	struct zuf_root_info *zri = gw->zri;
 	struct zufc_thread *zt;
 	int cpu = smp_processor_id();
+	bool chan_free = false;
 	uint c;
 
 	/* Look for least busy channel. All busy we are left with zt0 */
@@ -788,7 +789,9 @@ static void _goose_one(void *info)
 
 		if (!_zt_pigi_has_inode(zt->pigi_put, gw->inode))
 			return;
-		if (!zt->zdo)
+
+		chan_free = relay_is_fss_waiting_grab(&zt->relay);
+		if (chan_free)
 			break;
 	}
 
@@ -796,7 +799,7 @@ static void _goose_one(void *info)
 	zt->pigi_put->needs_goosing = true;
 	_goose_get(gw);
 	zt->pigi_put->waiter = gw;
-	if (!zt->zdo)
+	if (chan_free)
 		relay_fss_wakeup(&zt->relay);
 }
 
