@@ -313,7 +313,7 @@ int zufc_dbg_rdwr(struct zuf_root_info *zri, enum e_mount_operation op,
 	return _dispatch_mount(zri, op, zim);
 }
 
-static int _zu_mount(struct file *file, void *parg)
+static int _zu_wait_mount(struct file *file, void *parg)
 {
 	struct super_block *sb = file->f_inode->i_sb;
 	struct zuf_root_info *zri = ZRI(sb);
@@ -1529,7 +1529,7 @@ long zufc_ioctl(struct file *file, unsigned int cmd, ulong arg)
 	case ZU_IOC_REGISTER_FS:
 		return _zu_register_fs(file, parg);
 	case ZU_IOC_MOUNT:
-		return _zu_mount(file, parg);
+		return _zu_wait_mount(file, parg);
 	case ZU_IOC_NUMA_MAP:
 		return _zu_numa_map(file, parg);
 	case ZU_IOC_GRAB_PMEM:
