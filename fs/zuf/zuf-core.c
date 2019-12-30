@@ -20,6 +20,7 @@
 #include <linux/sched/signal.h>
 #include <linux/uaccess.h>
 #include <linux/kref.h>
+#include <linux/mount.h>
 
 #include "zuf.h"
 #include "relay.h"
@@ -68,6 +69,7 @@ struct zuf_threads_pool {
 		spinlock_t lock;
 		struct relay relay;
 		struct zufs_ioc_mount *zim;
+		struct vfsmount *vfsmnt;
 	} mount;
 
 	uint _max_zts;
@@ -256,20 +258,46 @@ static int _dispatch_mount(struct zuf_root_info *zri,
 int zufc_mount(struct zuf_root_info *zri, struct zus_fs_info *zus_zfi,
 			struct zufs_ioc_mount *zim)
 {
+	struct __mount_thread_info *zmt = &zri->_ztp->mount;
+	struct vfsmount *zr_mnt = zmt->vfsmnt;
+	int err = 0;
+
+	spin_lock(&zmt->lock);
+	if (likely(zmt->zsf.file))
+		mntget(zr_mnt);
+	else
+		err = -ESHUTDOWN;
+	spin_unlock(&zmt->lock);
+
+	if (unlikely(err))
+		return err;
+
 	zim->hdr.out_len = sizeof(*zim);
 	zim->hdr.in_len = sizeof(*zim) + zim->zmi.po.mount_options_len;
 	zim->zmi.zus_zfi = zus_zfi;
 	zim->zmi.num_cpu = zri->_ztp->_max_zts;
 	zim->zmi.num_channels = zri->_ztp->_max_channels;
 
-	return _dispatch_mount(zri, ZUFS_M_MOUNT, zim);
+	err = _dispatch_mount(zri, ZUFS_M_MOUNT, zim);
+	if (unlikely(err)) {
+		mntput(zr_mnt);
+		return err;
+	}
+
+	return 0;
 }
 
 int zufc_umount(struct zuf_root_info *zri, struct zufs_ioc_mount *zim)
 {
+	struct vfsmount *zr_mnt = zri->_ztp->mount.vfsmnt;
+	int err;
+
 	zim->hdr.out_len = sizeof(*zim);
 	zim->hdr.in_len = sizeof(*zim);
-	return _dispatch_mount(zri, ZUFS_M_UMOUNT, zim);
+	err = _dispatch_mount(zri, ZUFS_M_UMOUNT, zim);
+
+	mntput(zr_mnt);
+	return err;
 }
 
 int zufc_remount(struct zuf_root_info *zri, struct zufs_ioc_mount *zim)
@@ -301,6 +329,7 @@ static int _zu_mount(struct file *file, void *parg)
 		/* First time register this file as the mount-thread owner */
 		zmt->zsf.type = zlfs_e_mout_thread;
 		zmt->zsf.file = file;
+		zmt->vfsmnt = file->f_path.mnt;
 		file->private_data = &zmt->zsf;
 		zri->state = ZUF_ROOT_MOUNT_READY;
 	} else if (unlikely(file->private_data != zmt)) {
