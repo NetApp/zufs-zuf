@@ -843,31 +843,6 @@ static void _goose_one(void *info)
 	bool chan_free = false;
 	uint c;
 
-#if 0
-	/* Look for least busy channel. All busy we are left with zt0 */
-	for (c = INITIAL_ZT_CHANNELS; c; --c) {
-		zt = _zt_from_cpu(zri, cpu, c - 1);
-		if (unlikely(!(zt && zt->hdr.file)))
-			return; /* We are crashing */
-
-		if (!zt->pigi_put->s || zt->pigi_put->needs_goosing)
-			return; /* this cpu is goose empty */
-
-		if (!_zt_pigi_has_inode(zt->pigi_put, gw->inode))
-			return;
-
-		chan_free = relay_is_fss_waiting_grab(&zt->relay);
-		if (chan_free)
-			break;
-	}
-
-	/* Tell them to ... */
-	zt->pigi_put->needs_goosing = true;
-	_goose_get(gw);
-	zt->pigi_put->waiter = gw;
-	if (chan_free)
-		relay_fss_wakeup(&zt->relay);
-#endif
 	/* goosing goes on the back_chan */
 	zt = _zt_from_cpu(zri, cpu, BACK_CHAN_NO);
 	if (unlikely(!(zt && zt->hdr.file)))
