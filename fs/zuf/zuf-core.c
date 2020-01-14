@@ -1035,6 +1035,10 @@ static void zufc_zt_release(struct file *file)
 		msleep(1000); /* crap */
 	}
 
+	/* release any waiting goose */
+	if (zt->pigi_state & EZS_tell_me_when_done)
+		_goose_put(zt->pigi_put->waiter);
+
 	if (zt->chan == 0)
 		vfree(zt->pigi_put->buff);
 
