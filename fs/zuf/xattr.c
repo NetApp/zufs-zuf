@@ -20,6 +20,7 @@
 
 struct _xxxattr {
 	void *user_buffer;
+	size_t user_buffer_size;
 	union {
 		struct zufs_ioc_xattr ioc_xattr;
 		char buf[512];
@@ -48,7 +49,13 @@ static int _xattr_oh(struct zuf_dispatch_op *zdo, void *parg, ulong max_bytes)
 	ioc_xattr->user_buf_size = user_ioc_xattr->user_buf_size;
 
 	hdr->out_len -= sizeof(ioc_xattr->user_buf_size);
-	memcpy(_xxattr->user_buffer, user_ioc_xattr->buf, hdr->out_len);
+	if (unlikely(!_xxattr->user_buffer_size && hdr->out_len))
+		zuf_err("non-zero xattr value len=%d\n", (int)hdr->out_len);
+	else if (unlikely(_xxattr->user_buffer_size < hdr->out_len))
+		hdr->err = -ERANGE;
+	else
+		memcpy(_xxattr->user_buffer, user_ioc_xattr->buf, hdr->out_len);
+
 	return 0;
 }
 
@@ -78,6 +85,7 @@ ssize_t __zuf_getxattr(struct inode *inode, int type, const char *name,
 	ioc_xattr = &p_xattr->d.ioc_xattr;
 	memset(ioc_xattr, 0, sizeof(*ioc_xattr));
 	p_xattr->user_buffer = buffer;
+	p_xattr->user_buffer_size = size;
 
 	ioc_xattr->hdr.in_len = ioc_size;
 	ioc_xattr->hdr.out_start =
@@ -171,6 +179,7 @@ static ssize_t __zuf_listxattr(struct inode *inode, char *buffer, size_t size)
 	ioc_xattr = &s_xattr.d.ioc_xattr;
 	memset(ioc_xattr, 0, sizeof(*ioc_xattr));
 	s_xattr.user_buffer = buffer;
+	s_xattr.user_buffer_size = size;
 
 	ioc_xattr->hdr.in_len = sizeof(*ioc_xattr);
 	ioc_xattr->hdr.out_start =
