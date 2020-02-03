@@ -210,6 +210,7 @@ enum {
 enum e_zufs_hdr_flags {
 	ZUFS_H_INTR		= (1 << 0),
 	ZUFS_H_HAS_PIGY_PUT	= (1 << 1),
+	ZUFS_H_INODE_CLEAN	= (1 << 2),
 };
 
 struct zufs_ioc_hdr {
@@ -680,13 +681,10 @@ enum ZUFS_SYNC_FLAGS {
 
 struct zufs_ioc_sync {
 	struct zufs_ioc_hdr hdr;
-	/* IN */
+	/* IN/OUT */
 	struct zus_inode_info *zus_ii;
 	__u64 offset, length;
 	__u64 flags;
-
-	/* OUT */
-	__u64 write_unmapped;
 };
 
 /* ZUFS_OP_CLONE */

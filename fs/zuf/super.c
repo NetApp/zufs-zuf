@@ -737,13 +737,15 @@ static int zuf_update_s_wtime(struct super_block *sb)
 	return 0;
 }
 
-static void _sync_add_inode(struct inode *inode)
+void zuf_sync_add(struct inode *inode)
 {
 	struct zuf_sb_info *sbi = SBI(inode->i_sb);
 	struct zuf_inode_info *zii = ZUII(inode);
 
-	zuf_dbg_mmap("[%ld] write_mapped=%d\n",
-		      inode->i_ino, atomic_read(&zii->write_mapped));
+	if (test_and_set_bit(ZUF_II_DIRTY, &zii->flags))
+		return;
+
+	zuf_dbg_mmap("[%ld]\n", inode->i_ino);
 
 	spin_lock(&sbi->s_mmap_dirty_lock);
 
@@ -756,34 +758,21 @@ static void _sync_add_inode(struct inode *inode)
 	spin_unlock(&sbi->s_mmap_dirty_lock);
 }
 
-static void _sync_remove_inode(struct inode *inode)
+void zuf_sync_remove(struct inode *inode)
 {
 	struct zuf_sb_info *sbi = SBI(inode->i_sb);
 	struct zuf_inode_info *zii = ZUII(inode);
 
-	zuf_dbg_mmap("[%ld] write_mapped=%d\n",
-		      inode->i_ino, atomic_read(&zii->write_mapped));
+	if (!test_and_clear_bit(ZUF_II_DIRTY, &zii->flags))
+		return;
+
+	zuf_dbg_mmap("[%ld]\n", inode->i_ino);
 
 	spin_lock(&sbi->s_mmap_dirty_lock);
+
 	list_del_init(&zii->i_mmap_dirty);
+
 	spin_unlock(&sbi->s_mmap_dirty_lock);
-}
-
-void zuf_sync_inc(struct inode *inode)
-{
-	struct zuf_inode_info *zii = ZUII(inode);
-
-	if (1 == atomic_inc_return(&zii->write_mapped))
-		_sync_add_inode(inode);
-}
-
-/* zuf_sync_dec will unmapped in batches */
-void zuf_sync_dec(struct inode *inode, ulong write_unmapped)
-{
-	struct zuf_inode_info *zii = ZUII(inode);
-
-	if (0 == atomic_sub_return(write_unmapped, &zii->write_mapped))
-		_sync_remove_inode(inode);
 }
 
 /*
@@ -848,7 +837,7 @@ static void _init_once(void *foo)
 	init_rwsem(&zii->xa_rwsem);
 	init_rwsem(&zii->in_sync);
 	atomic_set(&zii->vma_count, 0);
-	atomic_set(&zii->write_mapped, 0);
+	zii->flags = 0;
 }
 
 int __init zuf_init_inodecache(void)

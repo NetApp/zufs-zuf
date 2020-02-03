@@ -68,8 +68,8 @@ int zuf_private_mount(struct zuf_root_info *zri, struct register_fs_info *rfi,
 int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb);
 struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
 				   struct zus_sb_info *zus_sbi);
-void zuf_sync_inc(struct inode *inode);
-void zuf_sync_dec(struct inode *inode, ulong write_unmapped);
+void zuf_sync_add(struct inode *inode);
+void zuf_sync_remove(struct inode *inode);
 
 /* file.c */
 int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync);

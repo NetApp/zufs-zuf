@@ -140,7 +140,7 @@ again:
 	zuf_dbg_mmap("[%ld] vm_insert_mixed 0x%lx prot=0x%lx => %d\n",
 		    _zi_ino(zi), pfn, vma->vm_page_prot.pgprot, err);
 
-	zuf_sync_inc(inode);
+	zuf_sync_add(inode);
 put:
 	_zufs_IO_put_multy(sbi, inode, &io_gb);
 out:

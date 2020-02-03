@@ -181,6 +181,7 @@ int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync)
 	struct zuf_inode_info *zii = ZUII(inode);
 	struct zufs_ioc_sync ioc_range = {
 		.hdr.in_len = sizeof(ioc_range),
+		.hdr.out_len = sizeof(ioc_range),
 		.hdr.operation = ZUFS_OP_SYNC,
 		.zus_ii = zii->zus_ii,
 		.offset = start,
@@ -190,10 +191,8 @@ int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync)
 	ulong uend = end + 1;
 	int err = 0;
 
-	zuf_dbg_vfs(
-		"[%ld] start=0x%llx end=0x%llx  datasync=%d write_mapped=%d\n",
-		inode->i_ino, start, end, datasync,
-		atomic_read(&zii->write_mapped));
+	zuf_dbg_vfs("[%ld] start=0x%llx end=0x%llx  datasync=%d\n",
+		    inode->i_ino, start, end, datasync);
 
 	/* We want to serialize the syncs so they don't fight with each other
 	 * and is though more efficient, but we do not want to lock out
@@ -215,7 +214,7 @@ int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync)
 		goto out;
 	}
 
-	if (!atomic_read(&zii->write_mapped))
+	if (!test_bit(ZUF_II_DIRTY, &zii->flags))
 		goto out; /* Nothing to do on this inode */
 
 	ioc_range.length = uend - start;
@@ -224,10 +223,12 @@ int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync)
 
 	err = zufc_dispatch(ZUF_ROOT(SBI(inode->i_sb)), &ioc_range.hdr,
 			    NULL, 0);
+	if (ioc_range.hdr.flags & ZUFS_H_INODE_CLEAN) {
+		zuf_dbg_mmap("[%ld] got hint\n", inode->i_ino);
+		zuf_sync_remove(inode);
+	}
 	if (unlikely(err))
 		zuf_dbg_err("zufc_dispatch failed => %d\n", err);
-
-	zuf_sync_dec(inode, ioc_range.write_unmapped);
 
 out:
 	zuf_smw_unlock(zii);

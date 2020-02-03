@@ -250,6 +250,12 @@ int zuf_rw_fallocate(struct inode *inode, uint mode, loff_t pos, loff_t len)
 
 	err = _IO_dispatch(SBI(inode->i_sb), &io, ZUII(inode),
 			   ZUFS_OP_FALLOCATE, 0, NULL, 0, pos, 0);
+
+	if (io.hdr.flags & ZUFS_H_INODE_CLEAN) {
+		zuf_dbg_mmap("[%ld] got hint\n", inode->i_ino);
+		zuf_sync_remove(inode);
+	}
+
 	return err;
 
 }

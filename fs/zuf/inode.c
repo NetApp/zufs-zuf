@@ -271,7 +271,6 @@ void zuf_evict_inode(struct inode *inode)
 {
 	struct super_block *sb = inode->i_sb;
 	struct zuf_inode_info *zii = ZUII(inode);
-	int write_mapped;
 
 	if (!inode->i_nlink) {
 		if (unlikely(!zii->zi)) {
@@ -312,12 +311,13 @@ out:
 	zii->zi = NULL;
 
 	/* ZUS on evict has synced all mmap dirty pages, YES? */
-	write_mapped = atomic_read(&zii->write_mapped);
-	if (unlikely(write_mapped || !list_empty(&zii->i_mmap_dirty))) {
-		zuf_dbg_mmap("[%ld] !!!! write_mapped=%d list_empty=%d\n",
-			      inode->i_ino, write_mapped,
-			      list_empty(&zii->i_mmap_dirty));
-		zuf_sync_dec(inode, write_mapped);
+	if (unlikely(test_bit(ZUF_II_DIRTY, &zii->flags) ||
+		     !list_empty(&zii->i_mmap_dirty))) {
+		zuf_dbg_mmap("[%ld] !!!! dirty=%d list_empty=%d\n",
+			     inode->i_ino, test_bit(ZUF_II_DIRTY, &zii->flags),
+			     list_empty(&zii->i_mmap_dirty));
+		/* TODO(sagi): should this be under zuf_w_lock? */
+		zuf_sync_remove(inode);
 	}
 
 	clear_inode(inode);
