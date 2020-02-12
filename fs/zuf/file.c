@@ -214,7 +214,8 @@ int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync)
 		goto out;
 	}
 
-	if (!test_bit(ZUF_II_DIRTY, &zii->flags))
+	if (!(SBI(inode->i_sb)->fs_caps & ZUFS_FSC_SYNC_ALWAYS) &&
+	    !test_bit(ZUF_II_DIRTY, &zii->flags))
 		goto out; /* Nothing to do on this inode */
 
 	ioc_range.length = uend - start;

@@ -289,6 +289,7 @@ enum {
 	ZUFS_FSC_ACL_ON		= 0x0001,
 	ZUFS_FSC_NIO_READS	= 0x0002,
 	ZUFS_FSC_NIO_WRITES	= 0x0004,
+	ZUFS_FSC_SYNC_ALWAYS	= 0x0008,
 };
 
 struct zufs_mount_info {
