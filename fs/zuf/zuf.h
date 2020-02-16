@@ -424,6 +424,8 @@ struct zuf_dispatch_op {
 
 	/* Don't touch zuf-core only!!! */
 	struct zufc_thread *__locked_zt;
+
+	cpumask_t cpus_mask;
 };
 
 static inline void

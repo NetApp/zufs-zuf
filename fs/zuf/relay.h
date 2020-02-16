@@ -22,8 +22,6 @@ struct relay {
 	wait_queue_head_t app_wq;
 	bool app_wakeup;
 	bool app_waiting;
-
-	cpumask_t cpus_allowed;
 };
 
 static inline void relay_init(struct relay *relay)
