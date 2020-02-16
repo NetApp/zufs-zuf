@@ -246,8 +246,9 @@ static int zuf_flush(struct file *file, fl_owner_t id)
 	return 0;
 }
 
-static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
-		      u64 offset, u64 length)
+noinline
+static int _fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+		   u64 offset, u64 length, long *on_stack, uint on_stack_size)
 {
 	struct super_block *sb = inode->i_sb;
 	struct zuf_inode_info *zii = ZUII(inode);
@@ -260,7 +261,6 @@ static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		.length = length,
 		.flags = fieinfo->fi_flags,
 	};
-	long on_stack[ZUF_MAX_STACK(160) / sizeof(long)];
 	struct page **pages = NULL;
 	enum big_alloc_type bat = 0;
 	uint nump = 0, extents_max = 0;
@@ -297,7 +297,7 @@ static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 		ioc_fiemap.hdr.len = extents_max * sizeof(struct fiemap_extent);
 		ioc_fiemap.hdr.offset = offset;
 
-		pages = big_alloc(nump * sizeof(*pages), sizeof(on_stack),
+		pages = big_alloc(nump * sizeof(*pages), on_stack_size,
 				  on_stack, GFP_KERNEL, &bat);
 		if (unlikely(!pages))
 			return -ENOMEM;
@@ -335,6 +335,15 @@ free:
 	big_free(pages, bat);
 
 	return err;
+}
+
+static int zuf_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
+		      u64 offset, u64 length)
+{
+	long on_stack[ZUF_MAX_STACK(8) / sizeof(long)];
+
+	return _fiemap(inode, fieinfo, offset, length, on_stack,
+		       sizeof(on_stack));
 }
 
 /* ~~~~~ clone/copy range ~~~~~ */
