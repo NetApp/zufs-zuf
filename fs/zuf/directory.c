@@ -17,6 +17,8 @@
 #include <linux/vmalloc.h>
 #include "zuf.h"
 
+#define ZUF_MAX_DIR_BUFFER_SIZE		(8 * PAGE_SIZE)
+
 static int zuf_readdir(struct file *file, struct dir_context *ctx)
 {
 	struct inode *inode = file_inode(file);
@@ -43,7 +45,7 @@ static int zuf_readdir(struct file *file, struct dir_context *ctx)
 		ioc_readdir.hdr.len = PAGE_SIZE;
 	else
 		ioc_readdir.hdr.len = min_t(loff_t, i_size - ctx->pos,
-					    ZUS_API_MAP_MAX_SIZE);
+					    ZUF_MAX_DIR_BUFFER_SIZE);
 	nump = md_o2p_up(ioc_readdir.hdr.len);
 	/* Allocating both readdir buffer and the pages-array.
 	 * Pages array is at end
