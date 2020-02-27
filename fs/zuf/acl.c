@@ -56,6 +56,7 @@ static void _acl_to_value(const struct posix_acl *acl, void *value)
 static int __set_acl(struct inode *inode, struct posix_acl *acl, int type,
 		     bool set_mode)
 {
+	struct zuf_inode_info *zii = ZUII(inode);
 	char *name = NULL;
 	void *buf;
 	int err;
@@ -66,7 +67,7 @@ static int __set_acl(struct inode *inode, struct posix_acl *acl, int type,
 
 	switch (type) {
 	case ACL_TYPE_ACCESS: {
-		struct zus_inode *zi = ZUII(inode)->zi;
+		struct zus_inode *zi = zii->zi;
 
 		name = XATTR_POSIX_ACL_ACCESS;
 		if (acl && set_mode) {
@@ -105,16 +106,18 @@ static int __set_acl(struct inode *inode, struct posix_acl *acl, int type,
 	 *  In the case it returned an error it should not cl_flush.
 	 *  We will restore to old i_mode.
 	 */
+	zuf_xaw_lock(zii);
 	err = __zuf_setxattr(inode, ZUF_XF_SYSTEM, name, buf, size, 0);
 	if (likely(!err)) {
 		set_cached_acl(inode, type, acl);
 	} else {
 		/* Error need to restore changes (xfstest/generic/449) */
-		struct zus_inode *zi = ZUII(inode)->zi;
+		struct zus_inode *zi = zii->zi;
 
 		inode->i_mode = old_mode;
 		zi->i_mode = cpu_to_le16(inode->i_mode);
 	}
+	zuf_xaw_unlock(zii);
 
 	kfree(buf);
 	return err;
@@ -217,7 +220,7 @@ struct posix_acl *zuf_get_acl(struct inode *inode, int type)
 		return ERR_PTR(-EINVAL);
 	}
 
-	zuf_smr_lock(zii);
+	zuf_xar_lock(zii);
 
 	ret = __zuf_getxattr(inode, ZUF_XF_SYSTEM, name, buf, PAGE_SIZE);
 	if (likely(ret > 0)) {
@@ -231,7 +234,7 @@ struct posix_acl *zuf_get_acl(struct inode *inode, int type)
 	if (!IS_ERR(acl))
 		set_cached_acl(inode, type, acl);
 
-	zuf_smr_unlock(zii);
+	zuf_xar_unlock(zii);
 
 	free_page((ulong)buf);
 
