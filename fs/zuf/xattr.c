@@ -65,6 +65,8 @@ ssize_t __zuf_getxattr(struct inode *inode, int type, const char *name,
 	int err;
 	ssize_t ret;
 
+	WARN_ON(!rwsem_is_locked(&ZUII(inode)->xa_rwsem));
+
 	zuf_dbg_vfs("[%ld] type=%d name=%s size=%lu ioc_size=%lu\n",
 			inode->i_ino, type, name, size, ioc_size);
 
@@ -120,6 +122,7 @@ int __zuf_setxattr(struct inode *inode, int type, const char *name,
 	zuf_dbg_vfs("[%ld] type=%d name=%s size=%lu ioc_size=%lu\n",
 			inode->i_ino, type, name, size, ioc_size);
 
+	WARN_ON(!rwsem_is_locked(&ZUII(inode)->xa_rwsem));
 	p_xattr = big_alloc(_XXXATTR_SIZE(ioc_size), sizeof(s_xattr), &s_xattr,
 			    GFP_KERNEL, &bat);
 	if (unlikely(!p_xattr))
