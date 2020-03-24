@@ -169,6 +169,7 @@ struct zuf_sb_info {
 	/* Mount options */
 	unsigned long	s_mount_opt;
 	ulong		fs_caps;
+	uint		falloc_sup;
 	char		*pmount_dev; /* for private mount */
 
 	spinlock_t		s_mmap_dirty_lock;

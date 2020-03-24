@@ -42,10 +42,7 @@ long __zuf_fallocate(struct inode *inode, int mode, loff_t offset, loff_t len)
 	 * a zusFS that does not support one of these can just return
 	 * EOPNOTSUPP.
 	 */
-	if (mode & ~(FALLOC_FL_KEEP_SIZE | FALLOC_FL_PUNCH_HOLE |
-		     FALLOC_FL_NO_HIDE_STALE | FALLOC_FL_COLLAPSE_RANGE |
-		     FALLOC_FL_ZERO_RANGE | FALLOC_FL_INSERT_RANGE |
-		     FALLOC_FL_UNSHARE_RANGE | ZUFS_FL_TRUNCATE)){
+	if (mode & ~SBI(inode->i_sb)->falloc_sup) {
 		zuf_dbg_err("Unsupported mode(0x%x)\n", mode);
 		return -EOPNOTSUPP;
 	}

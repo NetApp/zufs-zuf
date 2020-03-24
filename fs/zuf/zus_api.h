@@ -310,6 +310,8 @@ struct zufs_mount_info {
 	/* FS specific info */
 	__u32 fs_caps;
 	__u32 s_blocksize_bits;
+	__u32 falloc_sup;
+	__u32 __pad2;
 
 	/* IN - mount options, var len must be last */
 	struct zufs_parse_options po;

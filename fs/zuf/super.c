@@ -552,6 +552,8 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	if (sbi->fs_caps & ZUFS_FSC_ACL_ON)
 		sb->s_flags |= SB_POSIXACL;
 
+	sbi->falloc_sup = ioc_mount->zmi.falloc_sup;
+
 	sb->s_op = &zuf_sops;
 	sb->s_xattr = zuf_xattr_handlers;
 
