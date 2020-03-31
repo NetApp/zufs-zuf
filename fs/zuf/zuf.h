@@ -407,6 +407,7 @@ enum {
 	/* These are bit flags*/
 	EZDO_M_NONE_INTR = 0x1,
 	EZDO_M_BACK_CHAN = 0x2,
+	EZDO_M_LOCKED_CHAN = 0x4,
 };
 
 struct zuf_dispatch_op {
