@@ -38,9 +38,15 @@ struct __pigi_put_it {
 	void *waiter;
 	uint s; /* total encoded bytes */
 	uint last; /* So we can update last zufs_ioc_hdr->flags */
-	bool needs_goosing;
+	ulong l_inodes[PG5 + 1];	/* in flight inodes */
 	ulong inodes[PG5 + 1];
 	uint ic;
+};
+
+/* Bit flags for below pigi_state */
+enum {
+	EZS_tell_me_when_done = 0x01,
+	EZS_needs_goosing     = 0x02,
 };
 
 struct zufc_thread {
@@ -63,6 +69,7 @@ struct zufc_thread {
 	 */
 	struct __pigi_put_it pigi_put_chan0;
 	struct __pigi_put_it *pigi_put;
+	ulong pigi_state;
 };
 
 struct zuf_threads_pool {
@@ -692,6 +699,9 @@ static void pigy_put_dh(struct zuf_dispatch_op *zdo, void *pzt, void *parg)
 	struct zufs_ioc_IO *io_user = parg;
 
 	_pigy_put_encode(io, io_user, zdo->bns);
+
+	zuf_dbg_core("[0x%03lx] in_len=%d iom_n=%d m=0x%x\n", _zt_pr_no(pzt),
+		     io_user->hdr.in_len, io_user->ziom.iom_n, zdo->mode);
 }
 
 static int _pigy_put_now(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
@@ -699,7 +709,7 @@ static int _pigy_put_now(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
 	int err;
 
 	zdo->dh = pigy_put_dh;
-	zdo->mode |= EZDO_M_NONE_INTR;
+	zdo->mode |= (EZDO_M_NONE_INTR | EZDO_M_BACK_CHAN);
 
 	err = __zufc_dispatch(zri, zdo);
 	if (unlikely(err == -EZUFS_RETRY)) {
@@ -731,7 +741,7 @@ int zufc_pigy_put(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo,
 
 	cpu = get_cpu();
 
-	zt = _zt_from_cpu(zri, cpu, 0);
+	zt = _zt_from_cpu(zri, cpu, BACK_CHAN_NO);
 	if (do_now || (zt->pigi_put->s + pigi_put_s > _ZT_MAX_PIGY_PUT) ||
 	    (zt->pigi_put->ic > PG5)) {
 		put_cpu();
@@ -745,8 +755,7 @@ int zufc_pigy_put(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo,
 			zuf_dbg_perf(
 				"[%ld] iom_n=0x%x zt->pigi_put->s=0x%x + 0x%x > 0x%lx ic=%d\n",
 				zdo->inode->i_ino, iom_n, zt->pigi_put->s,
-				pigi_put_s, _ZT_MAX_PIGY_PUT,
-				zt->pigi_put->ic++);
+				pigi_put_s, _ZT_MAX_PIGY_PUT, zt->pigi_put->ic);
 
 		return _pigy_put_now(zri, zdo);
 	}
@@ -770,14 +779,18 @@ int zufc_pigy_put(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo,
 /* Add the pigy_put accumulated buff to current command
  * Always runs in the context of a ZT
  */
-static void _pigy_put_add_to_ioc(struct zuf_root_info *zri,
+static bool _pigy_put_add_to_ioc(struct zuf_root_info *zri,
 				 struct zufc_thread *zt)
 {
 	struct zufs_ioc_hdr *hdr = zt->opt_buff;
 	struct __pigi_put_it *pigi = zt->pigi_put;
 
+if (zt->pigi_state & EZS_needs_goosing)
+	zuf_dbg_perf("[0x%03lx] Want to see 4 0x%lx\n",
+		     _zt_pr_no(zt), zt->pigi_state);
+
 	if (unlikely(!pigi->s))
-		return;
+		return false;
 
 	if (unlikely(pigi->s + hdr->in_len > zt->max_zt_command)) {
 		zuf_err("!!! Should not pigi_put->s(%d) + in_len(%d) > max_zt_command(%ld)\n",
@@ -785,39 +798,42 @@ static void _pigy_put_add_to_ioc(struct zuf_root_info *zri,
 		/*TODO we must check at init time that max_zt_command not too
 		 * small
 		 */
-		return;
+		return false;
 	}
 
 	memcpy((void *)hdr + hdr->in_len, pigi->buff, pigi->s);
 	hdr->flags |= ZUFS_H_HAS_PIGY_PUT;
 	pigi->s = pigi->last = 0;
 	pigi->ic = 0;
-	/* for every 3 channels */
-	pigi->inodes[PG0] = pigi->inodes[PG1] = pigi->inodes[PG2] = 0;
-	pigi->inodes[PG3] = pigi->inodes[PG4] = pigi->inodes[PG5] = 0;
+
+	memcpy(pigi->l_inodes, pigi->inodes, sizeof(pigi->inodes));
+	memset(pigi->inodes, 0, sizeof(pigi->inodes));
+	return true;
 }
 
-static void _goose_prep(struct zuf_root_info *zri,
+static bool _goose_prep(struct zuf_root_info *zri,
 			struct zufc_thread *zt)
 {
 	_prep_header_size_op(zt->opt_buff, ZUFS_OP_NOOP, 0);
-	_pigy_put_add_to_ioc(zri, zt);
-
-	zt->pigi_put->needs_goosing = false;
+	return _pigy_put_add_to_ioc(zri, zt);
 }
 
-static inline bool _zt_pigi_has_inode(struct __pigi_put_it *pigi,
-				      ulong inode)
+static inline bool _a_has_inode(ulong inodes[PG5 + 1], ulong inode)
 {
-	return	pigi->ic &&
-		((pigi->inodes[PG0] == inode) ||
-		 (pigi->inodes[PG1] == inode) ||
-		 (pigi->inodes[PG2] == inode) ||
-		 (pigi->inodes[PG3] == inode) ||
-		 (pigi->inodes[PG4] == inode) ||
-		 (pigi->inodes[PG5] == inode));
+	return	((inodes[PG0] == inode) ||
+		 (inodes[PG1] == inode) ||
+		 (inodes[PG2] == inode) ||
+		 (inodes[PG3] == inode) ||
+		 (inodes[PG4] == inode) ||
+		 (inodes[PG5] == inode));
 }
 
+static inline bool _zt_pigi_has_inode(struct __pigi_put_it *pigi, ulong inode)
+{
+	return	pigi->ic && _a_has_inode(pigi->inodes, inode);
+}
+
+/* The target of on_each_cpu() always comes with cpu_get(ed) */
 static void _goose_one(void *info)
 {
 	struct _goose_waiter *gw = info;
@@ -827,6 +843,7 @@ static void _goose_one(void *info)
 	bool chan_free = false;
 	uint c;
 
+#if 0
 	/* Look for least busy channel. All busy we are left with zt0 */
 	for (c = INITIAL_ZT_CHANNELS; c; --c) {
 		zt = _zt_from_cpu(zri, cpu, c - 1);
@@ -850,6 +867,42 @@ static void _goose_one(void *info)
 	zt->pigi_put->waiter = gw;
 	if (chan_free)
 		relay_fss_wakeup(&zt->relay);
+#endif
+	/* goosing goes on the back_chan */
+	zt = _zt_from_cpu(zri, cpu, BACK_CHAN_NO);
+	if (unlikely(!(zt && zt->hdr.file)))
+		return; /* We are crashing */
+
+	zt->pigi_put->waiter = gw;
+	if (!zt->pigi_put->s || !_zt_pigi_has_inode(zt->pigi_put, gw->inode)) {
+		/* NOTE: if back_chan is in progress we always wait for it */
+		if (!zt->relay.fss_waiting &&
+		    _a_has_inode(zt->pigi_put->l_inodes, gw->inode)) {
+			zt->pigi_state = EZS_tell_me_when_done;
+			_goose_get(gw);
+		}
+		goto scan_front_channels;
+	}
+
+	zt->pigi_state = (EZS_tell_me_when_done | EZS_needs_goosing);
+	_goose_get(gw);
+	chan_free = relay_is_fss_waiting_grab(&zt->relay);
+	if (chan_free)
+		relay_fss_wakeup(&zt->relay);
+
+	/* Need to see if any for-channel is in a pigy_put state */
+scan_front_channels:
+	for (c = 0; c < BACK_CHAN_NO; ++c) {
+		zt = _zt_from_cpu(zri, cpu, c);
+		if (unlikely(!(zt && zt->hdr.file)))
+			return; /* We are crashing */
+
+		if (!zt->relay.fss_waiting &&
+		    _a_has_inode(zt->pigi_put->l_inodes, gw->inode)){
+			zt->pigi_state = EZS_tell_me_when_done;
+			_goose_get(gw);
+		}
+	}
 }
 
 /* NOTE: @inode must not be NULL */
@@ -879,6 +932,33 @@ void zufc_goose_all_zts(struct zuf_root_info *zri, struct inode *inode)
 
 out:
 	mutex_unlock(&zri->sbl_lock);
+}
+
+/*
+ * Return true means we need to return for a put cycle
+ */
+static bool _pigy_put_see_about_goosing(struct zuf_root_info *zri,
+					struct zufc_thread *zt)
+{
+	if (zt->chan == BACK_CHAN_NO){
+		if (zt->pigi_state & EZS_needs_goosing) {
+			zt->pigi_state &= ~EZS_needs_goosing;
+
+			if(_goose_prep(zri, zt))
+				/* go do a cycle and come back */
+				return true;
+			/* This is fine a front channel took the pigi_put for us
+			 * We can continue to do a _goose_put.
+			 */
+			zuf_dbg_perf("needs_goosing empty\n");
+		}
+	}
+
+	if (zt->pigi_state & EZS_tell_me_when_done) {
+		zt->pigi_state &= ~EZS_tell_me_when_done;
+		_goose_put(zt->pigi_put->waiter);
+	}
+	return false;
 }
 
 /* ~~~~~ ZT thread operations ~~~~~ */
@@ -938,7 +1018,6 @@ static int _zu_init(struct file *file, void *parg)
 			zi_init.hdr.err = -ENOMEM;
 			goto out;
 		}
-		zt->pigi_put->needs_goosing = false;
 		zt->pigi_put->last = zt->pigi_put->s = 0;
 	} else {
 		struct zufc_thread *zt0;
@@ -1106,8 +1185,11 @@ static int _zu_wait(struct file *file, void *parg)
 	}
 
 	user_hdr = zt->opt_buff;
-	if (user_hdr->flags & ZUFS_H_HAS_PIGY_PUT)
+	if (user_hdr->flags & ZUFS_H_HAS_PIGY_PUT) {
+		memset(&zt->pigi_put->l_inodes, 0,
+		       sizeof(zt->pigi_put->l_inodes));
 		user_hdr->flags &= ~ZUFS_H_HAS_PIGY_PUT;
+	}
 
 	if (relay_is_app_waiting(&zt->relay)) {
 		if (unlikely(!zt->zdo)) {
@@ -1133,25 +1215,22 @@ static int _zu_wait(struct file *file, void *parg)
 		if (unlikely(!err && _need_channel_lock(zt))) {
 			zt->zdo->__locked_zt = zt;
 			__chan_is_locked = true;
+			zt->zdo->mode |= EZDO_M_LOCKED_CHAN;
+			zuf_dbg_core("[0x%03lx] _need_channel_lock\n",
+				     _zt_pr_no(zt));
 		} else {
+			zt->zdo->mode &= ~EZDO_M_LOCKED_CHAN;
 			zt->zdo = NULL;
 		}
+
 		if (unlikely(err)) /* _copy_outputs returned an err */
 			goto err;
 
 		relay_app_wakeup(&zt->relay);
 	}
 
-	if (zt->pigi_put->needs_goosing && !__chan_is_locked) {
-		/* go do a cycle and come back */
-		_goose_prep(ZRI(file->f_inode->i_sb), zt);
+	if (_pigy_put_see_about_goosing(ZRI(file->f_inode->i_sb), zt))
 		return 0;
-	}
-
-	if (zt->pigi_put->waiter) {
-		_goose_put(zt->pigi_put->waiter);
-		zt->pigi_put->waiter = NULL;
-	}
 
 	err = __relay_fss_wait(&zt->relay, __chan_is_locked);
 	if (err)
@@ -1167,11 +1246,24 @@ static int _zu_wait(struct file *file, void *parg)
 		 */
 		_map_pages(zt, zt->zdo->pages, zt->zdo->nump,
 			   zt->zdo->hdr->operation == ZUFS_OP_WRITE);
-		if (zt->pigi_put->s)
-			_pigy_put_add_to_ioc(ZRI(file->f_inode->i_sb), zt);
+		if (zt->pigi_put->s) {
+			bool r = _pigy_put_add_to_ioc(ZRI(file->f_inode->i_sb),
+						      zt);
+
+			if (unlikely(!r))
+				zuf_warn("[0x%lx] Race While in a ZT? 0x%lx\n",
+					 _zt_pr_no(zt), zt->pigi_state);
+		}
 	} else {
-		if (zt->pigi_put->needs_goosing) {
-			_goose_prep(ZRI(file->f_inode->i_sb), zt);
+		if (zt->pigi_state & EZS_needs_goosing) {
+			bool r;
+			/* This only happens for back channels */
+			zt->pigi_state &= ~EZS_needs_goosing;
+			r = _goose_prep(ZRI(file->f_inode->i_sb), zt);
+			if (!r)
+				zuf_dbg_perf("[0x%03lx] Goose_one empty? st=0x%lx r=%d\n",
+					     _zt_pr_no(zt), zt->pigi_state, r);
+
 			return 0;
 		}
 
@@ -1204,7 +1296,7 @@ static int _try_grab_zt_channel(struct zuf_root_info *zri, int cpu,
 		}
 	}
 
-	*ztp = _zt_from_cpu(zri, cpu, 0);
+	*ztp = _zt_from_cpu(zri, cpu, minc);
 	return false;
 }
 
@@ -1229,14 +1321,17 @@ int __zufc_dispatch(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
 	struct task_struct *app = get_current();
 	struct zufs_ioc_hdr *hdr = zdo->hdr;
 	uint scan_b = 0, scan_e = BACK_CHAN_NO;
+	ulong loop = 0;
 	int cpu;
 	struct zufc_thread *zt;
 
 	if (unlikely(zri->state == ZUF_ROOT_SERVER_FAILED))
 		return -EIO;
 
-	if (unlikely(zdo->mode & EZDO_M_BACK_CHAN))
-		scan_b = scan_e++;
+	if (unlikely(zdo->mode & EZDO_M_BACK_CHAN)) {
+		scan_b = BACK_CHAN_NO; scan_e = INITIAL_ZT_CHANNELS;
+		zuf_dbg_core("Back channel %d %d\n", scan_b, scan_e);
+	}
 
 	if (unlikely(hdr->out_len && !hdr->out_max)) {
 		/* TODO: Complain here and let caller code do this proper */
@@ -1244,15 +1339,15 @@ int __zufc_dispatch(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
 	}
 
 	if (unlikely(zdo->__locked_zt)) {
+		cpu = get_cpu();
+
 		zt = zdo->__locked_zt;
 		zdo->__locked_zt = NULL;
-
-		cpu = get_cpu();
 		/* FIXME: Very Pedantic need it stay */
 		if (unlikely((zt->zdo != zdo) || cpu != zt->no)) {
+			put_cpu();
 			zuf_warn("[%ld] __locked_zt but zdo(%p != %p) || cpu(%d != %d)\n",
 				 _zt_pr_no(zt), zt->zdo, zdo, cpu, zt->no);
-			put_cpu();
 			goto channel_busy;
 		}
 		goto has_channel;
@@ -1272,7 +1367,11 @@ channel_busy:
 			zuf_err("[%d] !zt->file\n", cpu);
 			return -EIO;
 		}
-		zuf_dbg_err("[%d] can this be\n", cpu);
+
+		if (unlikely(0 == (++loop % 10)))
+			zuf_dbg_perf("[0x%03lx] sleeping long l=%ld\n",
+				     _zt_pr_no(zt), loop);
+
 		/* FIXME: Do something much smarter */
 		msleep(10);
 		if (!(zdo->mode & EZDO_M_NONE_INTR) &&
@@ -1282,6 +1381,9 @@ channel_busy:
 		}
 		goto channel_busy;
 	}
+	if (unlikely(10 <= loop))
+		zuf_dbg_perf("[0x%03lx] long wait end l=%ld\n",
+			     _zt_pr_no(zt), loop);
 
 	/* lock app to this cpu while waiting */
 	cpumask_copy(&zdo->cpus_mask, &app->cpus_mask);
@@ -1327,7 +1429,8 @@ int __zufc_dispatch(struct zuf_root_info *zri, struct zuf_dispatch_op *zdo)
 	t2 = ktime_get_ns();
 
 	if ((t2 - t1) > MAX_ZT_SEC * NSEC_PER_SEC)
-		zuf_err("zufc_dispatch(%s, [0x%x-0x%x]) took %lld sec\n",
+		zuf_err("m=0x%x zufc_dispatch(%s, [0x%x-0x%x]) took %lld sec\n",
+			zdo->mode,
 			zuf_op_name(zdo->hdr->operation), zdo->hdr->offset,
 			zdo->hdr->len,
 			(t2 - t1) / NSEC_PER_SEC);
