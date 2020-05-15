@@ -118,7 +118,8 @@
 #define ZUFS_READAHEAD_PAGES	8
 
 /* All device sizes offsets must align on 2M */
-#define ZUFS_ALLOC_MASK		(1024 * 1024 * 2 - 1)
+#define ZUFS_2M_SIZE		(1024UL * 1024 * 2)
+#define ZUFS_ALLOC_MASK		(ZUFS_2M_SIZE - 1)
 
 /**
  * zufs dual port memory

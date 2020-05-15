@@ -56,14 +56,6 @@ struct md_dev_larray {
 	struct md_dev_info **map;
 };
 
-#ifndef __KERNEL__
-struct fba {
-	int fd; void *ptr;
-	size_t size;
-	void *orig_ptr;
-};
-#endif /*! __KERNEL__*/
-
 struct zus_sb_info;
 struct multi_devices {
 	int dev_index;
@@ -78,7 +70,7 @@ struct multi_devices {
 	void *p_pmem_addr;
 	int fd;
 	uint user_page_size;
-	struct fba pages;
+	void *pages;
 	struct zus_sb_info *sbi;
 #else
 	ulong t1_blocks;
@@ -241,7 +233,7 @@ static inline struct page *md_bn_to_page(struct multi_devices *md, ulong bn)
 #ifdef __KERNEL__
 	return pfn_to_page(md_pfn(md, bn));
 #else
-	return md->pages.ptr + bn * md->user_page_size;
+	return md->pages + bn * md->user_page_size;
 #endif
 }
 
@@ -277,7 +269,7 @@ static inline ulong md_page_to_bn(struct multi_devices *md, struct page *page)
 #ifdef __KERNEL__
 	return md_addr_to_bn(md, page_address(page));
 #else
-	ulong bytes = (void *)page - md->pages.ptr;
+	ulong bytes = (void *)page - md->pages;
 
 	return bytes / md->user_page_size;
 #endif
