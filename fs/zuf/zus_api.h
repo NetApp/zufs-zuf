@@ -372,6 +372,37 @@ struct zufs_ioc_numa_map {
 };
 #define ZU_IOC_NUMA_MAP	_IOWR('Z', 13, struct zufs_ioc_numa_map)
 
+/* For each PAGE_SIZE of below pmem there is an associated zus_page struct.
+ * It must be 64 bytes (Intel cacheline)
+ */
+
+/* Defined bit flags for zus_page->flags undefined bits may be used by
+ * Server and/or zusFSs
+ */
+enum {
+	EZUFS_ZPF_Reserved	= 0, /* Might be used as a lock by Server */
+	EZUFS_ZPF_Error		= 1,
+	EZUFS_ZPF_KernHiRef	= 2,
+	EZUFS_ZPF_Indexed	= 3,
+};
+
+struct zus_page {
+	/* Only the two first members (flags & use_count) are accessed from
+	 * Kernel. They must be accessed atomically from both ends.
+	 */
+	__u64	flags;
+	__s32	use_count;
+	__s32	refcount;
+
+	__u64	index;
+	__u64	owner;
+
+	__u64	list_head[2];
+
+	__u64	private1;
+	__u64	private2;
+};
+
 struct zufs_ioc_pmem {
 	/* Set by zus */
 	struct zufs_ioc_hdr hdr;

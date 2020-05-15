@@ -104,6 +104,9 @@ static inline void zuf_add_fs_type(struct zuf_root_info *zri,
 struct zuf_pmem_file {
 	struct zuf_special_file hdr;
 	struct multi_devices *md;
+
+	/* For the pages vma */
+	struct zus_page *zpages;	/* vmalloc of zus_page per t1 block */
 };
 
 /*
@@ -463,6 +466,24 @@ struct _io_gb_multy {
 	ulong iom_n;
 	ulong *bns;
 };
+
+#define PAGES_IN_2M 512
+static inline struct zus_page *zuf_bn_to_page(struct zuf_sb_info *sbi, ulong bn)
+{
+	if (WARN_ON(md_t1_blocks(sbi->md) < bn))
+		return NULL;
+
+	return sbi->pmem.zpages + bn;
+}
+
+static inline ulong zuf_page_to_bn(struct zuf_sb_info *sbi, struct zus_page *p)
+{
+	if (WARN_ON((p <  sbi->pmem.zpages) ||
+		    (sbi->pmem.zpages + md_t1_blocks(sbi->md) < p) ))
+		return -1;
+
+	return p - sbi->pmem.zpages;
+}
 
 /* Keep this include last thing in file */
 #include "_extern.h"

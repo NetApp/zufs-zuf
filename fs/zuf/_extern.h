@@ -130,6 +130,7 @@ int zuf_file_mmap(struct file *file, struct vm_area_struct *vma);
 
 /* t1.c */
 int zuf_pmem_mmap(struct file *file, struct vm_area_struct *vma);
+void zuf_pmem_release(struct file *file);
 
 /* ioctl.c */
 long zuf_ioctl(struct file *filp, uint cmd, ulong arg);
