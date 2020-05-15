@@ -88,7 +88,7 @@ long __zuf_fallocate(struct inode *inode, int mode, loff_t offset, loff_t len)
 
 	if (need_unmap) {
 		zufc_goose_all_zts(ZUF_ROOT(SBI(inode->i_sb)), inode);
-		unmap_mapping_range(inode->i_mapping, offset, unmap_len, 1);
+		zuf_pi_unmap(inode, offset, unmap_len, EZUF_PIU_EVEN_COWS);
 	}
 
 	zus_inode_cmtime_now(inode, zii->zi);
@@ -216,7 +216,7 @@ int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync)
 		goto out; /* Nothing to do on this inode */
 
 	ioc_range.length = uend - start;
-	unmap_mapping_range(inode->i_mapping, start, ioc_range.length, 0);
+	zuf_pi_unmap(inode, start, ioc_range.length, EZUF_PIU_SYNC);
 	zufc_goose_all_zts(ZUF_ROOT(SBI(inode->i_sb)), inode);
 
 	err = zufc_dispatch(ZUF_ROOT(SBI(inode->i_sb)), &ioc_range.hdr,
@@ -566,8 +566,8 @@ static int _clone_file_range(struct inode *src_inode, loff_t pos_in,
 	int err;
 
 	/* NOTE: len==0 means to-end-of-file which is what we want */
-	unmap_mapping_range(src_inode->i_mapping, pos_in,  len, 0);
-	unmap_mapping_range(dst_inode->i_mapping, pos_out, len, 0);
+	zuf_pi_unmap(src_inode, pos_in,  len, EZUF_PIU_SYNC);
+	zuf_pi_unmap(dst_inode, pos_out, len, 0);
 
 	zufc_goose_all_zts(ZUF_ROOT(SBI(dst_inode->i_sb)), dst_inode);
 

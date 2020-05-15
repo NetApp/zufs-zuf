@@ -485,6 +485,13 @@ static inline ulong zuf_page_to_bn(struct zuf_sb_info *sbi, struct zus_page *p)
 	return p - sbi->pmem.zpages;
 }
 
+/* These are the possible flags to zuf_pi_unmap */
+enum {
+	EZUF_PIU_EVEN_COWS	= 1,
+	EZUF_PIU_SYNC		= 2,
+	EZUF_PIU_UNLOCKED	= 4,
+};
+
 /* Keep this include last thing in file */
 #include "_extern.h"
 

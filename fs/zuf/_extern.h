@@ -125,6 +125,9 @@ int zuf_iom_execute_async(struct super_block *sb, struct zus_iomap_done *iomd,
 int zuf_rw_file_range_compare(struct inode *i_in, loff_t pos_in,
 			      struct inode *i_out, loff_t pos_out, loff_t len);
 
+/* pi.c */
+void zuf_pi_unmap(struct inode *inode, loff_t holebegin, loff_t holelen, int f);
+
 /* mmap.c */
 int zuf_file_mmap(struct file *file, struct vm_area_struct *vma);
 

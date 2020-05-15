@@ -399,9 +399,8 @@ static ssize_t _zufs_IO(struct zuf_sb_info *sbi, struct inode *inode,
 			ra->prev_pos	= io.ra.prev_pos;
 		}
 		if (io.wr_unmap.len)
-			unmap_mapping_range(inode->i_mapping,
-					    io.wr_unmap.offset,
-					    io.wr_unmap.len, 0);
+			zuf_pi_unmap(inode, io.wr_unmap.offset,
+				     io.wr_unmap.len, 0);
 
 		for (i = 0; i < nump; ++i)
 			put_page(pages[i]);
@@ -621,8 +620,8 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 	zuf_rw_cached_put(sbi, inode, &io_gb);
 out:
 	if (io_gb.IO.wr_unmap.len)
-		unmap_mapping_range(inode->i_mapping, io_gb.IO.wr_unmap.offset,
-				    io_gb.IO.wr_unmap.len, 0);
+		zuf_pi_unmap(inode, io_gb.IO.wr_unmap.offset,
+			     io_gb.IO.wr_unmap.len, 0);
 
 	return unlikely(pos == start) ? err : pos - start;
 }
@@ -900,6 +899,7 @@ static int iom_unmap(struct super_block *sb, struct inode *inode, __u64 **cur_e)
 	ulong	unmap_index = _zufs_iom_first_val(&iom_unmap->unmap_index);
 	ulong	unmap_n = iom_unmap->unmap_n;
 	ulong	ino = iom_unmap->ino;
+	int flags = 0;
 
 	if (!inode || ino) {
 		if (WARN_ON(!ino)) {
@@ -926,12 +926,12 @@ static int iom_unmap(struct super_block *sb, struct inode *inode, __u64 **cur_e)
 		}
 
 		inode = inode_look;
+		flags = EZUF_PIU_UNLOCKED;
 	}
 
 	zuf_dbg_rw("[%ld] 0x%lx-0x%lx\n", inode->i_ino, unmap_index, unmap_n);
 
-	unmap_mapping_range(inode->i_mapping, md_p2o(unmap_index),
-			    md_p2o(unmap_n), 0);
+	zuf_pi_unmap(inode, md_p2o(unmap_index), md_p2o(unmap_n), flags);
 
 	if (inode_look)
 		iput(inode_look);
