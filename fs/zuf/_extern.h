@@ -109,9 +109,10 @@ ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
 			 struct kiocb *kiocb, struct iov_iter *ii);
 ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
 			  struct kiocb *kiocb, struct iov_iter *ii);
-int _zufs_IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode,
-		       loff_t pos, ulong len, struct _io_gb_multy *io_gb);
-void _zufs_IO_put_multy(struct zuf_sb_info *sbi, struct inode *inode,
+int zuf_rw_cached_get(struct zuf_sb_info *sbi, struct inode *inode, uint rw,
+		       struct file_ra_state *ra, loff_t pos, ulong len,
+		       ulong *bns, struct _io_gb_multy *io_gb);
+void zuf_rw_cached_put(struct zuf_sb_info *sbi, struct inode *inode,
 			struct _io_gb_multy *io_gb);
 int zuf_rw_fallocate(struct inode *inode, uint mode, loff_t offset, loff_t len);
 int zuf_rw_fadvise(struct super_block *sb, struct file *file,

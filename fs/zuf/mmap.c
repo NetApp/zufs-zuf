@@ -61,10 +61,7 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	struct zuf_inode_info *zii = ZUII(inode);
 	struct zus_inode *zi = zii->zi;
 	ulong bn;
-	struct _io_gb_multy io_gb = {
-		.IO.rw = WRITE | ZUFS_RW_MMAP,
-		.bns = &bn,
-	};
+	struct _io_gb_multy io_gb;
 	vm_fault_t fault = VM_FAULT_SIGBUS;
 	ulong addr = vmf->address;
 	ulong pmem_bn;
@@ -100,8 +97,8 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	zus_inode_cmtime_now(inode, zi);
 	/* NOTE: zus needs to flush the zi */
 
-	err = _zufs_IO_get_multy(sbi, inode, md_p2o(vmf->pgoff), PAGE_SIZE,
-				 &io_gb);
+	err = zuf_rw_cached_get(sbi, inode, WRITE | ZUFS_RW_MMAP, NULL,
+				 md_p2o(vmf->pgoff), PAGE_SIZE, &bn, &io_gb);
 	if (unlikely(err)) {
 		zuf_dbg_err("_get_put_block failed => %d\n", err);
 		goto out;
@@ -136,7 +133,7 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 
 	zuf_sync_add(inode);
 put:
-	_zufs_IO_put_multy(sbi, inode, &io_gb);
+	zuf_rw_cached_put(sbi, inode, &io_gb);
 out:
 	zuf_smr_unlock(zii);
 	sb_end_pagefault(inode->i_sb);
@@ -156,10 +153,7 @@ static vm_fault_t zuf_read_fault(struct vm_area_struct *vma,
 	struct zuf_inode_info *zii = ZUII(inode);
 	struct zus_inode *zi = zii->zi;
 	ulong bn;
-	struct _io_gb_multy io_gb = {
-		.IO.rw = READ | ZUFS_RW_MMAP,
-		.bns = &bn,
-	};
+	struct _io_gb_multy io_gb;
 	vm_fault_t fault = VM_FAULT_SIGBUS;
 	ulong addr = vmf->address;
 	ulong pmem_bn;
@@ -192,8 +186,9 @@ static vm_fault_t zuf_read_fault(struct vm_area_struct *vma,
 	file_accessed(vma->vm_file);
 	/* NOTE: zus needs to flush the zi */
 
-	err = _zufs_IO_get_multy(sbi, inode, md_p2o(vmf->pgoff), PAGE_SIZE,
-				 &io_gb);
+	err = zuf_rw_cached_get(sbi, inode, READ | ZUFS_RW_MMAP,
+				 &vma->vm_file->f_ra, md_p2o(vmf->pgoff),
+				 PAGE_SIZE, &bn, &io_gb);
 	if (unlikely(err && err != -EINTR)) {
 		zuf_err("_get_put_block failed => %d\n", err);
 		goto out;
@@ -221,7 +216,7 @@ static vm_fault_t zuf_read_fault(struct vm_area_struct *vma,
 
 put:
 	if (pmem_bn)
-		_zufs_IO_put_multy(sbi, inode, &io_gb);
+		zuf_rw_cached_put(sbi, inode, &io_gb);
 out:
 	zuf_smr_unlock(zii);
 	return fault;

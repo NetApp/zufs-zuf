@@ -390,31 +390,45 @@ static ssize_t _zufs_IO(struct zuf_sb_info *sbi, struct inode *inode,
 	return pos - start_pos;
 }
 
-int _zufs_IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode,
-		       loff_t pos, ulong len, struct _io_gb_multy *io_gb)
+static int _IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode, uint rw,
+			 struct file_ra_state *ra, loff_t pos, ulong len,
+			 ulong *bns, struct _io_gb_multy *io_gb)
 {
 	struct zufs_ioc_IO *IO = &io_gb->IO;
 	int err;
+
+	memset(IO, 0, sizeof(*IO));
 
 	IO->hdr.operation = ZUFS_OP_GET_MULTY;
 	IO->hdr.in_len = sizeof(*IO);
 	IO->hdr.out_len = sizeof(*IO);
 	IO->hdr.len = len;
+	IO->rw = rw,
 	IO->zus_ii = ZUII(inode)->zus_ii;
 	IO->filepos = pos;
 	IO->last_pos = pos;
+	if (ra) {
+		IO->ra.start	= ra->start;
+		IO->ra.ra_pages	= ra->ra_pages;
+		IO->ra.prev_pos	= ra->prev_pos;
+	}
 
 	zuf_dispatch_init(&io_gb->zdo, &IO->hdr, NULL, 0);
 	io_gb->zdo.oh = rw_overflow_handler;
 	io_gb->zdo.sb = sbi->sb;
 	io_gb->zdo.inode = inode;
-	io_gb->zdo.bns = io_gb->bns;
-
+	io_gb->zdo.bns = bns;
 
 	err = __zufc_dispatch(ZUF_ROOT(sbi), &io_gb->zdo);
 	if (unlikely(err == -EZUFS_RETRY)) {
 		zuf_err("Unexpected ZUS return => %d\n", err);
 		err = -EIO;
+	}
+
+	if (ra) {
+		ra->start	= IO->ra.start;
+		ra->ra_pages	= IO->ra.ra_pages;
+		ra->prev_pos	= IO->ra.prev_pos;
 	}
 
 	if (unlikely(err)) {
@@ -456,8 +470,8 @@ int _zufs_IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode,
 	return 0;
 }
 
-void _zufs_IO_put_multy(struct zuf_sb_info *sbi, struct inode *inode,
-			struct _io_gb_multy *io_gb)
+static void _IO_put_multy(struct zuf_sb_info *sbi, struct inode *inode,
+			  struct _io_gb_multy *io_gb)
 {
 	bool put_now;
 	int err;
@@ -520,6 +534,22 @@ static inline int _write_one(struct zuf_sb_info *sbi, struct iov_iter *ii,
 	return 0;
 }
 
+int zuf_rw_cached_get(struct zuf_sb_info *sbi, struct inode *inode, uint rw,
+		       struct file_ra_state *ra, loff_t pos, ulong len,
+		       ulong *bns, struct _io_gb_multy *io_gb)
+{
+	io_gb->iom_n = 0;
+	io_gb->bns = bns;
+
+	return _IO_get_multy(sbi, inode, rw, ra, pos, len, bns, io_gb);
+}
+
+void zuf_rw_cached_put(struct zuf_sb_info *sbi, struct inode *inode,
+			struct _io_gb_multy *io_gb)
+{
+	_IO_put_multy(sbi, inode, io_gb);
+}
+
 static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 			    ulong *bns, uint max_bns,
 			    struct iov_iter *ii, struct file_ra_state *ra,
@@ -527,29 +557,16 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 {
 	loff_t pos = start;
 	uint offset = pos & (PAGE_SIZE - 1);
-	struct _io_gb_multy io_gb = { .bns = bns, };
+	struct _io_gb_multy io_gb;
 	ssize_t size;
 	int err;
 	uint i;
 
-	if (ra) {
-		io_gb.IO.ra.start	= ra->start;
-		io_gb.IO.ra.ra_pages	= ra->ra_pages;
-		io_gb.IO.ra.prev_pos	= ra->prev_pos;
-	}
-	io_gb.IO.rw = rw;
-
 	size = min_t(ssize_t, ZUS_API_MAP_MAX_SIZE - offset,
 		     iov_iter_count(ii));
-	err = _zufs_IO_get_multy(sbi, inode, pos, size, &io_gb);
+	err = zuf_rw_cached_get(sbi, inode, rw, ra, pos, size, bns, &io_gb);
 	if (unlikely(err))
 		return err;
-
-	if (ra) {
-		ra->start	= io_gb.IO.ra.start;
-		ra->ra_pages	= io_gb.IO.ra.ra_pages;
-		ra->prev_pos	= io_gb.IO.ra.prev_pos;
-	}
 
 	if (unlikely(io_gb.IO.last_pos != (pos + size))) {
 		if (unlikely(io_gb.IO.last_pos < pos)) {
@@ -590,7 +607,7 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 			break;
 	}
 out:
-	_zufs_IO_put_multy(sbi, inode, &io_gb);
+	zuf_rw_cached_put(sbi, inode, &io_gb);
 	if (io_gb.IO.wr_unmap.len)
 		unmap_mapping_range(inode->i_mapping, io_gb.IO.wr_unmap.offset,
 				    io_gb.IO.wr_unmap.len, 0);
