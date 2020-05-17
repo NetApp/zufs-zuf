@@ -71,7 +71,7 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	pgoff_t size;
 	pfn_t pfnt;
 	ulong pfn;
-	int err, retry = 0;
+	int err;
 
 	zuf_dbg_mmap("[%ld] vm_start=0x%lx vm_end=0x%lx VA=0x%lx "
 		    "pgoff=0x%lx vmf_flags=0x%x cow_page=%p page=%p\n",
@@ -100,7 +100,6 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	zus_inode_cmtime_now(inode, zi);
 	/* NOTE: zus needs to flush the zi */
 
-again:
 	err = _zufs_IO_get_multy(sbi, inode, md_p2o(vmf->pgoff), PAGE_SIZE,
 				 &io_gb);
 	if (unlikely(err)) {
@@ -109,15 +108,10 @@ again:
 	}
 	pmem_bn = _gb_bn(&io_gb.IO);
 	if (unlikely(pmem_bn == 0)) {
-		/* FS returned short; retry */
-		if (++retry % 100 == 0)
-			zuf_err("[%ld] io_gb.rw=0x%llx ret_flags=0x%x retry=%d\n",
-				_zi_ino(zi), io_gb.IO.rw, io_gb.IO.ret_flags,
-				retry);
-		memset(&io_gb, 0, sizeof(io_gb));
-		io_gb.IO.rw = WRITE | ZUFS_RW_MMAP;
-		io_gb.bns = &bn;
-		goto again;
+		zuf_err("[%ld] pmem_bn=0  rw=0x%llx ret_flags=0x%x but no error?\n",
+			_zi_ino(zi), io_gb.IO.rw, io_gb.IO.ret_flags);
+		fault = VM_FAULT_SIGBUS;
+		goto out;
 	}
 
 	if (io_gb.IO.ret_flags & ZUFS_RET_NEW) {
