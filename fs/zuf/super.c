@@ -853,13 +853,11 @@ static void _init_once(void *foo)
 
 int __init zuf_init_inodecache(void)
 {
-	zuf_inode_cachep = kmem_cache_create("zuf_inode_cache",
-					       sizeof(struct zuf_inode_info),
-					       0,
-					       (SLAB_RECLAIM_ACCOUNT |
-						SLAB_MEM_SPREAD |
-						SLAB_TYPESAFE_BY_RCU),
-					       _init_once);
+	zuf_inode_cachep = kmem_cache_create_usercopy( "zuf_inode_cache",
+				sizeof(struct zuf_inode_info), 0,
+				(SLAB_RECLAIM_ACCOUNT | SLAB_MEM_SPREAD |
+					SLAB_TYPESAFE_BY_RCU),
+				0, sizeof(struct zuf_inode_info), _init_once);
 	if (zuf_inode_cachep == NULL)
 		return -ENOMEM;
 	return 0;
@@ -941,7 +939,8 @@ void zuf_8k_free(void *ptr)
 
 int __init zuf_8k_cache_init(void)
 {
-	zuf_8k_cachep = kmem_cache_create("zuf_8k_cache", S_8K, 0, 0, NULL);
+	zuf_8k_cachep = kmem_cache_create_usercopy("zuf_8k_cache", S_8K, 0, 0,
+						   0, S_8K, NULL);
 	if (unlikely(!zuf_8k_cachep))
 		return -ENOMEM;
 	return 0;
