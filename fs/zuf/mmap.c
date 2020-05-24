@@ -64,6 +64,11 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	zuf_dbg_mmap("[%ld] [@x%lx] vm_start=0x%lx VA=0x%lx vmf_flags=0x%x\n",
 		    _zi_ino(zi), vmf->pgoff, vma->vm_start, addr, vmf->flags);
 
+	if (vma->vm_flags & VM_SHARED)
+		zuf_pcpu_inc(sbi, zu_pcpu_us_mmap_shrd_wr_flt);
+	else
+		zuf_pcpu_inc(sbi, zu_pcpu_us_mmap_prvt_wr_flt);
+
 	sb_start_pagefault(inode->i_sb);
 	zuf_smr_lock_pagefault(zii);
 
@@ -133,6 +138,9 @@ out:
 
 static vm_fault_t zuf_pfn_mkwrite(struct vm_fault *vmf)
 {
+	struct inode *inode = vmf->vma->vm_file->f_mapping->host;
+
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_mmap_rd_2_wr_flt);
 	return zuf_write_fault(vmf->vma, vmf);
 }
 
@@ -153,6 +161,11 @@ static vm_fault_t zuf_read_fault(struct vm_area_struct *vma,
 
 	zuf_dbg_mmap("[%ld] [@x%lx] vm_start=0x%lx VA=0x%lx vmf_flags=0x%x\n",
 		    _zi_ino(zi), vmf->pgoff, vma->vm_start, addr, vmf->flags);
+
+	if (vma->vm_flags & VM_SHARED)
+		zuf_pcpu_inc(sbi, zu_pcpu_us_mmap_shrd_rd_flt);
+	else
+		zuf_pcpu_inc(sbi, zu_pcpu_us_mmap_prvt_rd_flt);
 
 	zuf_smr_lock_pagefault(zii);
 
@@ -274,6 +287,12 @@ int zuf_file_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct inode *inode = file_inode(file);
 	struct zuf_inode_info *zii = ZUII(inode);
+
+	if (vma->vm_flags & VM_SHARED)
+		zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_mmap_shared);
+	else
+		zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_mmap_private);
+
 
 	file_accessed(file);
 

@@ -158,6 +158,58 @@ static inline struct zuf_inode_info *ZUII(struct inode *inode)
 	return container_of(inode, struct zuf_inode_info, vfs_inode);
 }
 
+enum pcpu {
+	zu_pcpu_us_seek,
+	zu_pcpu_us_fsync,
+	zu_pcpu_us_fallocate,
+	zu_pcpu_us_lookup,
+	zu_pcpu_us_create,
+	zu_pcpu_us_link,
+	zu_pcpu_us_unlink,
+	zu_pcpu_us_symlink,
+	zu_pcpu_us_mkdir,
+	zu_pcpu_us_rmdir,
+	zu_pcpu_us_mknod,
+	zu_pcpu_us_rename,
+	zu_pcpu_us_setattr,
+	zu_pcpu_us_setsize,
+	zu_pcpu_us_getxattr,
+	zu_pcpu_us_setxattr,
+	zu_pcpu_us_fadvise_willneed,
+	zu_pcpu_us_fadvise_dontneed,
+	zu_pcpu_us_mmap_shared,
+	zu_pcpu_us_mmap_private,
+	zu_pcpu_us_mmap_shrd_rd_flt,
+	zu_pcpu_us_mmap_shrd_wr_flt,
+	zu_pcpu_us_mmap_prvt_rd_flt,
+	zu_pcpu_us_mmap_prvt_wr_flt,
+	zu_pcpu_us_mmap_rd_2_wr_flt,
+	zu_pcpu_us_clone,
+	zu_pcpu_wr_bw,
+	zu_pcpu_rd_bw,
+	zu_pcpu_lt_4k_rd,
+	zu_pcpu_4k_rd,
+	zu_pcpu_4k_to_8k_rd,
+	zu_pcpu_8k_to_32k_rd,
+	zu_pcpu_gt_32k_rd,
+	zu_pcpu_lt_4k_wr,
+	zu_pcpu_4k_wr,
+	zu_pcpu_4k_to_8k_wr,
+	zu_pcpu_8k_to_32k_wr,
+	zu_pcpu_gt_32k_wr,
+	zu_pcpu_lt_4k_sync_wr,
+	zu_pcpu_4k_sync_wr,
+	zu_pcpu_4k_to_8k_sync_wr,
+	zu_pcpu_8k_to_32k_sync_wr,
+	zu_pcpu_gt_32k_sync_wr,
+	zu_pcpu_lt_4k_direct_wr,
+	zu_pcpu_4k_direct_wr,
+	zu_pcpu_4k_to_8k_direct_wr,
+	zu_pcpu_8k_to_32k_direct_wr,
+	zu_pcpu_gt_32k_direct_wr,
+	ZUFS_PCPU_COUNTERS,
+};
+
 /*
  * ZUF super-block data in memory
  */
@@ -177,11 +229,21 @@ struct zuf_sb_info {
 
 	spinlock_t		s_mmap_dirty_lock;
 	struct list_head	s_mmap_dirty;
+
+	struct percpu_counter pcpu[ZUFS_PCPU_COUNTERS];
 };
 
 static inline struct zuf_sb_info *SBI(struct super_block *sb)
 {
 	return sb->s_fs_info;
+}
+
+/* Batch setting for percpu counters arithmetics */
+#define ZUF_PCPU_COUNTERS_BATCH	8192
+
+static inline void zuf_pcpu_inc(struct zuf_sb_info *sbi, enum pcpu num)
+{
+	percpu_counter_add_batch(&sbi->pcpu[num], 1, ZUF_PCPU_COUNTERS_BATCH);
 }
 
 static inline struct zuf_fs_type *ZUF_FST(struct file_system_type *fs_type)

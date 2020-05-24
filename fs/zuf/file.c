@@ -123,6 +123,7 @@ static long zuf_fallocate(struct file *file, int mode, loff_t offset,
 
 	zuf_w_lock(zii);
 
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_fallocate);
 	err = __zuf_fallocate(inode, mode, offset, len);
 
 	zuf_w_unlock(zii);
@@ -143,6 +144,7 @@ static loff_t zuf_llseek(struct file *file, loff_t offset, int whence)
 	};
 	int err = 0;
 
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_seek);
 	zuf_dbg_vfs("[%ld] offset=0x%llx whence=%d\n",
 		     inode->i_ino, offset, whence);
 
@@ -246,7 +248,10 @@ out:
 
 static int zuf_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	return zuf_isync(file_inode(file), start, end, datasync);
+	struct inode *inode = file_inode(file);
+
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_fsync);
+	return zuf_isync(inode, start, end, datasync);
 }
 
 /* This callback is called when a file is closed */
@@ -662,6 +667,7 @@ static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 	ulong len_up;
 	int err;
 
+	zuf_pcpu_inc(SBI(sb), zu_pcpu_us_clone);
 	zuf_dbg_vfs("IN: [%ld]{0x%llx} => [%ld]{0x%llx} length=0x%llx flags=0x%x\n",
 		    src_inode->i_ino, pos_in, dst_inode->i_ino, pos_out, len,
 		    remap_flags);

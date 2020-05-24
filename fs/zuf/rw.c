@@ -28,6 +28,46 @@ static const char *_pr_rw(uint rw)
 	return (rw & WRITE) ? "WRITE" : "READ";
 }
 
+static void _inc_io_size_counter(struct zuf_sb_info *sbi, ulong size,
+			 enum pcpu base_counter_index)
+{
+	if (size == PAGE_SIZE) { /*  size == 4K */
+		zuf_pcpu_inc(sbi, base_counter_index + 1);
+		return;
+	}
+
+	switch (size >> PAGE_SHIFT)	{
+	case 0: /* size < 4K */
+		zuf_pcpu_inc(sbi, base_counter_index);
+		break;
+	case 1: /* 4K < size < 8K */
+		zuf_pcpu_inc(sbi, base_counter_index + 2);
+		break;
+	case 2: /* 8K <= size < 16K */
+	case 3:
+	case 4:
+	case 5:
+	case 6:
+	case 7:
+		zuf_pcpu_inc(sbi, base_counter_index + 3);
+		break;
+	default:
+		zuf_pcpu_inc(sbi, base_counter_index + 4);
+		break;
+
+	}
+}
+
+#define ZUF_IO_BW_BATCH	(1UL << 30) /* 1GB, minimize counter locking */
+
+static void _bw_add(struct zuf_sb_info *sbi, int pcpu_num, ulong add)
+{
+	percpu_counter_add_batch(&sbi->pcpu[pcpu_num], add, ZUF_IO_BW_BATCH);
+}
+
+#define _wr_bw_add(sbi, add) _bw_add(sbi, zu_pcpu_wr_bw, add)
+#define _rd_bw_add(sbi, add) _bw_add(sbi, zu_pcpu_rd_bw, add)
+
 static int _ioc_bounds_check(struct zufs_iomap *user_ziom, uint max_size)
 {
 	void *ziom_end = (void *)user_ziom + max_size;
@@ -674,7 +714,10 @@ ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
 {
 	long on_stack[ZUF_MAX_STACK(8) / sizeof(long)];
 	ulong rw = READ | rand_tag(kiocb);
+	struct zuf_sb_info *sbi = SBI(inode->i_sb);
 
+	_inc_io_size_counter(sbi, iov_iter_count(ii), zu_pcpu_lt_4k_rd);
+	_rd_bw_add(sbi, iov_iter_count(ii));
 	/* EOF protection */
 	if (unlikely(kiocb->ki_pos > i_size_read(inode)))
 		return 0;
@@ -687,31 +730,40 @@ ssize_t zuf_rw_read_iter(struct super_block *sb, struct inode *inode,
 	}
 
 	if (zuf_is_nio_reads(inode))
-		return _IO_gm(SBI(sb), inode, on_stack, sizeof(on_stack),
-			      ii, kiocb, kiocb_ra(kiocb), rw);
+		return _IO_gm(sbi, inode, on_stack, sizeof(on_stack), ii,
+			      kiocb, kiocb_ra(kiocb), rw);
 
-	return _zufs_IO(SBI(sb), inode, on_stack, sizeof(on_stack), ii,
-			kiocb, kiocb_ra(kiocb), ZUFS_OP_READ, rw);
+	return _zufs_IO(sbi, inode, on_stack, sizeof(on_stack), ii, kiocb,
+			kiocb_ra(kiocb), ZUFS_OP_READ, rw);
 }
 
 ssize_t zuf_rw_write_iter(struct super_block *sb, struct inode *inode,
 			  struct kiocb *kiocb, struct iov_iter *ii)
 {
+	struct zuf_sb_info *sbi = SBI(sb);
 	long on_stack[ZUF_MAX_STACK(8) / sizeof(long)];
 	ulong rw = WRITE;
 
+	_inc_io_size_counter(sbi, iov_iter_count(ii), zu_pcpu_lt_4k_wr);
+	_wr_bw_add(sbi, iov_iter_count(ii));
 	if (kiocb->ki_filp->f_flags & O_DSYNC ||
-	    IS_SYNC(kiocb->ki_filp->f_mapping->host))
+	    IS_SYNC(kiocb->ki_filp->f_mapping->host)) {
 		rw |= ZUFS_RW_DSYNC;
-	if (kiocb->ki_filp->f_flags & O_DIRECT)
+		_inc_io_size_counter(sbi, iov_iter_count(ii),
+				     zu_pcpu_lt_4k_sync_wr);
+	}
+	if (kiocb->ki_filp->f_flags & O_DIRECT) {
 		rw |= ZUFS_RW_DIRECT;
+		_inc_io_size_counter(sbi, iov_iter_count(ii),
+				     zu_pcpu_lt_4k_direct_wr);
+	}
 
 	if (zuf_is_nio_writes(inode))
-		return _IO_gm(SBI(sb), inode, on_stack, sizeof(on_stack),
-			      ii, kiocb, kiocb_ra(kiocb), rw);
+		return _IO_gm(sbi, inode, on_stack, sizeof(on_stack), ii, kiocb,
+			      kiocb_ra(kiocb), rw);
 
-	return _zufs_IO(SBI(sb), inode, on_stack, sizeof(on_stack),
-			ii, kiocb, kiocb_ra(kiocb), ZUFS_OP_WRITE, rw);
+	return _zufs_IO(sbi, inode, on_stack, sizeof(on_stack), ii, kiocb,
+			kiocb_ra(kiocb), ZUFS_OP_WRITE, rw);
 }
 
 static int _fadv_willneed(struct super_block *sb, struct inode *inode,
@@ -790,8 +842,10 @@ int zuf_rw_fadvise(struct super_block *sb, struct file *file,
 {
 	switch (advise) {
 	case POSIX_FADV_WILLNEED:
+		zuf_pcpu_inc(SBI(sb), zu_pcpu_us_fadvise_willneed);
 		return _fadv_willneed(sb, file_inode(file), offset, len, rand);
 	case POSIX_FADV_DONTNEED:
+		zuf_pcpu_inc(SBI(sb), zu_pcpu_us_fadvise_dontneed);
 		return _fadv_dontneed(sb, file_inode(file), offset, len);
 
 	case POSIX_FADV_SEQUENTIAL:

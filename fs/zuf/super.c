@@ -313,9 +313,35 @@ struct super_block *zuf_sb_from_id(struct zuf_root_info *zri, __u64 sb_id,
 	return sb;
 }
 
+static void _destroy_counters(struct super_block *sb)
+{
+	struct zuf_sb_info *sbi = SBI(sb);
+	int i;
+
+	for (i = 0; i < ZUFS_PCPU_COUNTERS; i++)
+		percpu_counter_destroy(&sbi->pcpu[i]);
+}
+
+static int _init_counters(struct super_block *sb)
+{
+	struct zuf_sb_info *sbi = SBI(sb);
+	int i, err;
+
+	for (i = 0; i < ZUFS_PCPU_COUNTERS; i++) {
+		err = percpu_counter_init(&sbi->pcpu[i], 0, GFP_KERNEL);
+		if (unlikely(err)) {
+			_destroy_counters(sb);
+			return err;
+		}
+	}
+	return 0;
+}
+
 static void zuf_put_super(struct super_block *sb)
 {
 	struct zuf_sb_info *sbi = SBI(sb);
+
+	_destroy_counters(sb);
 
 	/* FIXME: This is because of a Kernel BUG (in v4.20) which
 	 * sometimes complains in _setup_bdi() on a recycle_mount that sysfs
@@ -569,9 +595,14 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_root = d_make_root(root_i);
 	if (!sb->s_root) {
 		zuf_err_cnd(silent, "d_make_root root inode failed\n");
-		iput(root_i); /* undo zuf_iget */
 		err = -ENOMEM;
-		goto error;
+		goto error_iput;
+	}
+
+	err = _init_counters(sb);
+	if (unlikely(err)) {
+		zuf_err_cnd(silent, "counters initialization failed\n");
+		goto error_iput;
 	}
 
 	if (!zuf_rdonly(sb))
@@ -585,6 +616,8 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	big_free(ioc_mount, bat);
 	return 0;
 
+error_iput:
+	iput(root_i); /* undo zuf_iget */
 error:
 	zuf_warn("NOT mounting => %d\n", err);
 	if (sbi) {

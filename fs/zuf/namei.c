@@ -64,6 +64,7 @@ static struct dentry *zuf_lookup(struct inode *dir, struct dentry *dentry,
 	bool exist;
 	int err;
 
+	zuf_pcpu_inc(SBI(sb), zu_pcpu_us_lookup);
 	zuf_dbg_vfs("[%ld] dentry-name=%s\n", dir->i_ino, dentry->d_name.name);
 
 	if (dentry->d_name.len > ZUFS_NAME_LEN)
@@ -101,6 +102,7 @@ static int zuf_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 {
 	struct inode *inode;
 
+	zuf_pcpu_inc(SBI(dir->i_sb), zu_pcpu_us_create);
 	zuf_dbg_vfs("[%ld] dentry-name=%s mode=0x%x\n",
 		     dir->i_ino, dentry->d_name.name, mode);
 
@@ -122,6 +124,7 @@ static int zuf_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
 {
 	struct inode *inode;
 
+	zuf_pcpu_inc(SBI(dir->i_sb), zu_pcpu_us_mknod);
 	zuf_dbg_vfs("[%ld] mode=0x%x rdev=0x%x\n", dir->i_ino, mode, rdev);
 
 	inode = zuf_new_inode(dir, mode, &dentry->d_name, NULL, rdev, false);
@@ -170,6 +173,7 @@ static int zuf_symlink(struct inode *dir, struct dentry *dentry,
 	struct inode *inode;
 	ulong len;
 
+	zuf_pcpu_inc(SBI(dir->i_sb), zu_pcpu_us_symlink);
 	zuf_dbg_vfs("[%ld] de->name=%s symname=%s\n",
 			dir->i_ino, dentry->d_name.name, symname);
 
@@ -196,6 +200,7 @@ static int zuf_link(struct dentry *dest_dentry, struct inode *dir,
 	struct inode *inode = dest_dentry->d_inode;
 	int err;
 
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_link);
 	zuf_dbg_vfs("[%ld] dentry-ino=%ld dentry-name=%s dentry-parent=%ld dest_d-ino=%ld dest_d-name=%s\n",
 		     dir->i_ino, inode->i_ino, dentry->d_name.name,
 		     d_parent(dentry)->i_ino,
@@ -227,6 +232,7 @@ static int zuf_unlink(struct inode *dir, struct dentry *dentry)
 	struct inode *inode = dentry->d_inode;
 	int err;
 
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_unlink);
 	zuf_dbg_vfs("[%ld] dentry-ino=%ld dentry-name=%s dentry-parent=%ld\n",
 		     dir->i_ino, inode->i_ino, dentry->d_name.name,
 		     d_parent(dentry)->i_ino);
@@ -248,6 +254,7 @@ static int zuf_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	struct inode *inode;
 
+	zuf_pcpu_inc(SBI(dir->i_sb), zu_pcpu_us_mkdir);
 	zuf_dbg_vfs("[%ld] dentry-name=%s dentry-parent=%ld mode=0x%x\n",
 		     dir->i_ino, dentry->d_name.name, d_parent(dentry)->i_ino,
 		     mode);
@@ -289,6 +296,7 @@ static int zuf_rmdir(struct inode *dir, struct dentry *dentry)
 	struct inode *inode = dentry->d_inode;
 	int err;
 
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_rmdir);
 	zuf_dbg_vfs("[%ld] dentry-ino=%ld dentry-name=%s dentry-parent=%ld\n",
 		     dir->i_ino, inode->i_ino, dentry->d_name.name,
 		     d_parent(dentry)->i_ino);
@@ -341,6 +349,7 @@ static int zuf_rename(struct inode *old_dir, struct dentry *old_dentry,
 	struct timespec64 time = current_time(old_dir);
 	int err;
 
+	zuf_pcpu_inc(sbi, zu_pcpu_us_rename);
 	zuf_dbg_vfs(
 		"old_inode=%ld new_inode=%ld old_name=%s new_name=%s f=0x%x\n",
 		old_inode->i_ino, new_inode ? new_inode->i_ino : 0,

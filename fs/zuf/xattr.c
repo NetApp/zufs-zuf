@@ -222,6 +222,7 @@ int zuf_xattr_handler_get(const struct xattr_handler *handler,
 	struct zuf_inode_info *zii = ZUII(inode);
 	int ret;
 
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_getxattr);
 	zuf_dbg_xattr("[%ld] name=%s\n", inode->i_ino, name);
 
 	zuf_xar_lock(zii);
@@ -242,6 +243,7 @@ int zuf_xattr_handler_set(const struct xattr_handler *handler,
 	struct zuf_inode_info *zii = ZUII(inode);
 	int err;
 
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_setxattr);
 	zuf_dbg_xattr("[%ld] name=%s size=0x%lx flags=0x%x\n",
 			inode->i_ino, name, size, flags);
 

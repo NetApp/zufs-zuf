@@ -520,6 +520,8 @@ int zuf_setattr(struct dentry *dentry, struct iattr *attr)
 	};
 	int err;
 
+	zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_setattr);
+
 	if (!zi)
 		return -EACCES;
 
@@ -529,6 +531,7 @@ int zuf_setattr(struct dentry *dentry, struct iattr *attr)
 	 * other ATTRs
 	 */
 	if ((attr->ia_valid & ATTR_SIZE)) {
+		zuf_pcpu_inc(SBI(inode->i_sb), zu_pcpu_us_setsize);
 		ZUF_CHECK_I_W_LOCK(inode);
 		zuf_smw_lock(zii);
 		err = __zuf_fallocate(inode, ZUFS_FL_TRUNCATE, attr->ia_size,
