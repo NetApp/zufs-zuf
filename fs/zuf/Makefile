@@ -20,4 +20,4 @@ zuf-y += zuf-core.o zuf-root.o
 zuf-y += ioctl.o acl.o xattr.o
 zuf-y += rw.o mmap.o pi.o
 zuf-y += super.o inode.o directory.o namei.o file.o symlink.o
-zuf-y += module.o
+zuf-y += module.o sysfs.o

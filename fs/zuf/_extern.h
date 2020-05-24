@@ -182,4 +182,9 @@ extern const struct file_operations zuf_dir_operations;
 /* symlink.c */
 extern const struct inode_operations zuf_symlink_inode_operations;
 
+/* sysfs.c */
+void zuf_sysfs_entry_init(struct super_block *sb, struct zuf_fs_type *fst,
+			 struct block_device *blockdev);
+void zuf_sysfs_entry_fini(struct super_block *sb);
+
 #endif	/*ndef __ZUF_EXTERN_H__*/

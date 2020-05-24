@@ -232,6 +232,7 @@ int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs)
 {
 	struct zuf_fs_type *zft = _fs_type_alloc();
 	struct zuf_root_info *zri = ZRI(sb);
+	int err;
 
 	if (unlikely(!zft))
 		return -ENOMEM;
@@ -254,7 +255,15 @@ int zufr_register_fs(struct super_block *sb, struct zufs_ioc_register_fs *rfs)
 
 	zuf_add_fs_type(zft->zri, zft);
 	zuf_info("register_filesystem [%s]\n", zft->vfs_fst.name);
-	return register_filesystem(&zft->vfs_fst);
+	err = register_filesystem(&zft->vfs_fst);
+	if (unlikely(err))
+		return err;
+	/* Lets not fail over sysfs */
+	zft->sysfs_kset = kset_create_and_add(zft->vfs_fst.name, NULL, fs_kobj);
+	if (unlikely(!zft->sysfs_kset))
+		zuf_warn("Error initializing sysfs entry for %s\n",
+			 zft->vfs_fst.name);
+	return 0;
 }
 
 static void _unregister_all_fses(struct zuf_root_info *zri)
@@ -262,6 +271,7 @@ static void _unregister_all_fses(struct zuf_root_info *zri)
 	struct zuf_fs_type *zft, *n;
 
 	list_for_each_entry_safe_reverse(zft, n, &zri->fst_list, list) {
+		kset_unregister(zft->sysfs_kset);
 		unregister_filesystem(&zft->vfs_fst);
 		list_del_init(&zft->list);
 		_fs_type_free(zft);

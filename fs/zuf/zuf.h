@@ -89,6 +89,7 @@ struct zuf_fs_type {
 	struct zus_fs_info	*zus_zfi;
 	struct register_fs_info rfi;
 	struct zuf_root_info *zri;
+	struct kset *sysfs_kset;
 
 	struct list_head list;
 };
@@ -231,6 +232,8 @@ struct zuf_sb_info {
 	struct list_head	s_mmap_dirty;
 
 	struct percpu_counter pcpu[ZUFS_PCPU_COUNTERS];
+	struct kobject s_kobj;
+	struct completion s_kobj_unregister;
 };
 
 static inline struct zuf_sb_info *SBI(struct super_block *sb)

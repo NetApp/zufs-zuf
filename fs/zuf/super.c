@@ -341,6 +341,7 @@ static void zuf_put_super(struct super_block *sb)
 {
 	struct zuf_sb_info *sbi = SBI(sb);
 
+	zuf_sysfs_entry_fini(sb);
 	_destroy_counters(sb);
 
 	/* FIXME: This is because of a Kernel BUG (in v4.20) which
@@ -490,6 +491,7 @@ int zuf_private_umount(struct zuf_root_info *zri, struct super_block *sb)
 
 static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 {
+	struct zuf_fs_type *zfst = zuf_fst(sb);
 	struct zuf_sb_info *sbi = NULL;
 	struct __fill_super_params *fsp = data;
 	struct zufs_ioc_mount zim = {};
@@ -516,7 +518,7 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 
 	ioc_mount->zmi.po.mount_options_len = mount_options_len;
 
-	err = _sb_add(zuf_fst(sb)->zri, sb, &ioc_mount->zmi.sb_id);
+	err = _sb_add(zfst->zri, sb, &ioc_mount->zmi.sb_id);
 	if (unlikely(err)) {
 		zuf_err_cnd(silent, "_sb_add failed => %d\n", err);
 		goto error;
@@ -555,8 +557,7 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	}
 
 	/* Tell ZUS to mount an FS for us */
-	err = zufc_mount(ZUF_ROOT(sbi), zuf_fst(sb)->zus_zfi,
-				  ioc_mount);
+	err = zufc_mount(ZUF_ROOT(sbi), zfst->zus_zfi, ioc_mount);
 	if (unlikely(err)) {
 		zuf_err_cnd(silent, "zufc_dispatch_mount failed => %d\n", err);
 		goto error;
@@ -567,7 +568,7 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 	sb->s_blocksize_bits = ioc_mount->zmi.s_blocksize_bits;
 	sb->s_blocksize = 1 << ioc_mount->zmi.s_blocksize_bits;
 
-	rfi = &zuf_fst(sb)->rfi;
+	rfi = &zfst->rfi;
 
 	sb->s_magic = rfi->FS_magic;
 	sb->s_time_gran = rfi->s_time_gran;
@@ -607,6 +608,8 @@ static int zuf_fill_super(struct super_block *sb, void *data, int silent)
 
 	if (!zuf_rdonly(sb))
 		_sb_mwtime_now(sb, md_zdt(sbi->md));
+
+	zuf_sysfs_entry_init(sb, zfst, sbi->md->devs[sbi->md->dev_index].bdev);
 
 	mt_to_timespec(&root_i->i_ctime, &zus_zi(root_i)->i_ctime);
 	mt_to_timespec(&root_i->i_mtime, &zus_zi(root_i)->i_mtime);
