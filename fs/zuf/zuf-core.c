@@ -1185,7 +1185,7 @@ static int _zu_wait(struct file *file, void *parg)
 		 */
 		err = _copy_outputs(zt, parg);
 		if (err == EZUF_RETRY_DONE) {
-			put_user(zt->zdo->hdr->err, (int *)parg);
+			user_hdr->err = zt->zdo->hdr->err;
 			return 0;
 		}
 

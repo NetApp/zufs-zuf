@@ -28,20 +28,15 @@ static const char *_pr_rw(uint rw)
 	return (rw & WRITE) ? "WRITE" : "READ";
 }
 
-static int _ioc_bounds_check(struct zufs_iomap *ziom,
-			     struct zufs_iomap *user_ziom, void *ziom_end)
+static int _ioc_bounds_check(struct zufs_iomap *user_ziom, uint max_size)
 {
-	size_t iom_max_bytes = ziom_end - (void *)&user_ziom->iom_e;
+	void *ziom_end = (void *)user_ziom + max_size;
+	size_t iom_n_max = (ziom_end - (void *)&user_ziom->iom_e) /
+							sizeof(__u64);
 
-	if (unlikely((iom_max_bytes / sizeof(__u64) < ziom->iom_max))) {
-		zuf_err("kernel-buff-size(0x%zx) < ziom->iom_max(0x%x)\n",
-			(iom_max_bytes / sizeof(__u64)), ziom->iom_max);
-		return -EINVAL;
-	}
-
-	if (unlikely(ziom->iom_max < ziom->iom_n)) {
-		zuf_err("ziom->iom_max(0x%x) < ziom->iom_n(0x%x)\n",
-			ziom->iom_max, ziom->iom_n);
+	if (unlikely(iom_n_max < user_ziom->iom_n)) {
+		zuf_err("iom_n_max(0x%zx) < iom_n(0x%x)\n",
+			iom_n_max, user_ziom->iom_n);
 		return -EINVAL;
 	}
 
@@ -49,17 +44,22 @@ static int _ioc_bounds_check(struct zufs_iomap *ziom,
 }
 
 static void _extract_gb_multy_bns(struct _io_gb_multy *io_gb,
-				  struct zufs_ioc_IO *io_user)
+				  struct zufs_ioc_IO *io_user, uint max_bns)
 {
 	uint i;
 
 	/* Return of some T1 pages from GET_MULTY */
+	/* currently we do not support any other operations other than
+	 * IOM_T1_READ. (We could easily)
+	 */
+
 	io_gb->iom_n = 0;
-	for (i = 0; i < io_gb->IO.ziom.iom_n; ++i) {
+	for (i = 0; i < max_bns; ++i) {
 		ulong bn = _zufs_iom_t1_bn(io_user->iom_e[i]);
 
 		if (unlikely(bn == -1)) {
-			zuf_err("!!!!");
+			zuf_err("!!!! Not all decode i=%u max_bns=%u iom_e=0x%llx\n",
+				i, max_bns, io_user->iom_e[i]);
 			break;
 		}
 		io_gb->bns[io_gb->iom_n++] = bn;
@@ -71,61 +71,89 @@ static int rw_overflow_handler(struct zuf_dispatch_op *zdo, void *arg,
 {
 	struct zufs_ioc_IO *io = container_of(zdo->hdr, typeof(*io), hdr);
 	struct zufs_ioc_IO *io_user = arg;
+	ulong new_len;
 	int err;
 
-	*io = *io_user;
-
-	err = _ioc_bounds_check(&io->ziom, &io_user->ziom, arg + max_bytes);
+	err = _ioc_bounds_check(&io_user->ziom, max_bytes);
 	if (unlikely(err))
 		return err;
 
-	if ((io->hdr.err == -EZUFS_RETRY) &&
-	    io->ziom.iom_n && _zufs_iom_pop(io->iom_e)) {
+	if ((io_user->hdr.err == -EZUFS_RETRY) &&
+	    io_user->ziom.iom_n && _zufs_iom_pop(io_user->iom_e)) {
+		io->hdr.err = zuf_iom_execute_sync(zdo->sb, zdo->inode,
+						   io_user->iom_e,
+						   io_user->ziom.iom_n);
 
 		zuf_dbg_rw(
 			"[%s]zuf_iom_execute_sync(%d) max=0x%lx iom_e[%d] => %d\n",
-			zuf_op_name(io->hdr.operation), io->ziom.iom_n,
+			zuf_op_name(io->hdr.operation), io_user->ziom.iom_n,
 			max_bytes, _zufs_iom_opt_type(io_user->iom_e),
 			io->hdr.err);
 
-		io->hdr.err = zuf_iom_execute_sync(zdo->sb, zdo->inode,
-						   io_user->iom_e,
-						   io->ziom.iom_n);
 		return EZUF_RETRY_DONE;
 	}
 
 	/* No tier ups needed */
 
-	if (io->hdr.err == -EZUFS_RETRY) {
+	if (io_user->hdr.err == -EZUFS_RETRY) {
 		zuf_warn("ZUSfs violating API EZUFS_RETRY with no payload\n");
 		/* continue any way because we want to PUT all these GETs
 		 * we did. But the Server is buggy
 		 */
-		io->hdr.err = 0;
+		io_user->hdr.err = 0;
 	}
 
-	if (io->hdr.operation != ZUFS_OP_GET_MULTY)
+	if (io->hdr.operation != ZUFS_OP_GET_MULTY) {
+		*io = *io_user; /* copy the output to caller */
 		return 0; /* We are finished */
+	}
 
 	/* ZUFS_OP_GET_MULTY Decoding at ZT context  */
 
-	if (io->ziom.iom_n) {
+	/* catch the case Server returned IO to long */
+	new_len = io_user->last_pos - io->filepos;
+	if (unlikely(io->hdr.len < new_len)) {
+		zuf_err("Return overflow last_pos=0x%llx filepos=0x%llx len=0x%x\n",
+			io_user->last_pos, io->filepos, io->hdr.len);
+		/* We yell but continue because Server might have done a GET
+		 * and we want to still do a PUT, even with a smoking Server.
+		 */
+		new_len = io->hdr.len;
+		io_user->last_pos = io->filepos + new_len;
+	}
+
+	if (io_user->ziom.iom_n) {
 		struct _io_gb_multy *io_gb =
 					container_of(io, typeof(*io_gb), IO);
+		ulong 	offset = (io->filepos & ~PAGE_MASK);
+		uint max_bns = md_o2p_up(offset + new_len);
 
-		zuf_dbg_rw("[%s] _extract_bns(%d) iom_e[0x%llx]\n",
-			   zuf_op_name(io->hdr.operation), io->ziom.iom_n,
-			   io_user->iom_e[0]);
+		/* catch the case num_blocks_of(new_len) mismatch returned
+		 * iom_n. Use the minimum of the two. Also fix last_pos if
+		 * needed
+		 */
+		if (max_bns != io_user->ziom.iom_n) {
+			zuf_err("Bad Server new_len=0x%lx mismatch with iom_n=%d off=0x%lx\n",
+				new_len, io_user->ziom.iom_n, offset);
+			if (max_bns > io_user->ziom.iom_n) {
+				max_bns = io_user->ziom.iom_n;
+				io_user->last_pos = io->filepos +
+						    (md_p2o(max_bns) - offset);
 
-		if (unlikely(ZUS_API_MAP_MAX_PAGES < io->ziom.iom_n)) {
-			zuf_err("[%s] leaking T1 (%d) iom_e[0x%llx]\n",
-				zuf_op_name(io->hdr.operation), io->ziom.iom_n,
-				io_user->iom_e[0]);
-
-			io->ziom.iom_n = ZUS_API_MAP_MAX_PAGES;
+			}
 		}
 
-		_extract_gb_multy_bns(io_gb, io_user);
+		zuf_dbg_rw("[%s] _extract_bns(%d) iom_e[0x%llx]\n",
+			   zuf_op_name(io->hdr.operation), max_bns,
+			   io_user->iom_e[0]);
+
+		*io = *io_user;
+		_extract_gb_multy_bns(io_gb, io_user, max_bns);
+	} else if(new_len) {
+		zuf_err("[%s] iom_n=0 but new_len=0x%lx\n",
+			_pr_rw(io->rw), new_len);
+		io_user->last_pos = io_user->filepos = io->filepos;
+		*io = *io_user;
 	}
 
 	return 0;
@@ -395,13 +423,15 @@ static int _IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode, uint rw,
 			 ulong *bns, struct _io_gb_multy *io_gb)
 {
 	struct zufs_ioc_IO *IO = &io_gb->IO;
+	uint retry = 100;
 	int err;
 
+do_retry:
 	memset(IO, 0, sizeof(*IO));
 
 	IO->hdr.operation = ZUFS_OP_GET_MULTY;
-	IO->hdr.in_len = sizeof(*IO);
-	IO->hdr.out_len = sizeof(*IO);
+	IO->hdr.in_len = _ioc_IO_size(0);
+	IO->hdr.out_len = _ioc_IO_size(0);
 	IO->hdr.len = len;
 	IO->rw = rw,
 	IO->zus_ii = ZUII(inode)->zus_ii;
@@ -437,32 +467,22 @@ static int _IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode, uint rw,
 		 */
 		if ((err != -ENOSPC) && (err != -EIO) && (err != -EINTR))
 			zuf_warn("At this early stage show me %d\n", err);
-		if (io_gb->IO.ziom.iom_n)
+		if (IO->ziom.iom_n || (IO->filepos != IO->last_pos))
 			zuf_err("Server Smoking iom_n=%u err=%d\n",
 				io_gb->IO.ziom.iom_n, err);
 		zuf_dbg_err("_IO_dispatch => %d\n", err);
 		return err;
 	}
 	if (unlikely(!io_gb->iom_n)) {
-		if (!io_gb->IO.ziom.iom_n) {
-			if (err)
-				zuf_err("WANT tO SEE => %d\n", err);
-			return err;
-		} else {
-			ulong offset = pos & (PAGE_SIZE - 1);
-
-			if (md_o2p_up(offset + len) < io_gb->IO.ziom.iom_n) {
-				zuf_err("Unexpected num of iom_n=%d pos=0x%llx len=0x%lx\n",
-					io_gb->IO.ziom.iom_n, pos, len);
-				return -EIO;
-			}
-		}
-
-		_extract_gb_multy_bns(io_gb, &io_gb->IO);
-		if (unlikely(!io_gb->iom_n)) {
-			zuf_err("WHAT ????\n");
-			return err;
-		}
+		/* We always go through rw_overflow_handler It already yelled
+		 * about any errors and fixed what it can. If we get here it
+		 * means Server returned with zero length for us to retry
+		 * the operation.
+		 */
+		if (!--retry)
+			return -EIO;
+		schedule();
+		goto do_retry;
 	}
 	/* Even if _IO_dispatch returned a theoretical error but also some
 	 * pages, we do the few pages and do an OP_PUT_MULTY (error ignored)
@@ -569,17 +589,10 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 		return err;
 
 	if (unlikely(io_gb.IO.last_pos != (pos + size))) {
-		if (unlikely(io_gb.IO.last_pos < pos)) {
-			zuf_err("Server bad last_pos(0x%llx) <= pos(0x%llx) len=0x%lx\n",
-				 io_gb.IO.last_pos, pos, iov_iter_count(ii));
-			err = -EIO;
-			goto out;
-		}
-
-		zuf_dbg_err("Short %s start(0x%llx) len=0x%lx last_pos(0x%llx)\n",
-			    _pr_rw(rw), pos, iov_iter_count(ii),
-			    io_gb.IO.last_pos);
 		size = io_gb.IO.last_pos - pos;
+		zuf_dbg_rw("I see this pos=0x%llx size=0x%zx\n", pos, size);
+		if (!size)
+			goto out;
 	}
 
 	i = 0;
@@ -589,7 +602,7 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 
 		len = min_t(uint, PAGE_SIZE - offset, size);
 
-		bn = io_gb.bns[i];
+		bn = io_gb.bns[i++];
 		if (rw & WRITE)
 			err = _write_one(sbi, ii, bn, offset, len, i);
 		else
@@ -603,11 +616,9 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 		pos += len;
 		size -= len;
 		offset = 0;
-		if (io_gb.iom_n <= ++i)
-			break;
 	}
-out:
 	zuf_rw_cached_put(sbi, inode, &io_gb);
+out:
 	if (io_gb.IO.wr_unmap.len)
 		unmap_mapping_range(inode->i_mapping, io_gb.IO.wr_unmap.offset,
 				    io_gb.IO.wr_unmap.len, 0);
