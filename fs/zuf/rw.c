@@ -71,15 +71,26 @@ static int rw_overflow_handler(struct zuf_dispatch_op *zdo, void *arg,
 {
 	struct zufs_ioc_IO *io = container_of(zdo->hdr, typeof(*io), hdr);
 	struct zufs_ioc_IO *io_user = arg;
+	struct _io_gb_multy *io_gb = container_of(io, typeof(*io_gb), IO);
 	ulong new_len;
+	ulong offset;
+	uint max_bns;
 	int err;
 
 	err = _ioc_bounds_check(&io_user->ziom, max_bytes);
 	if (unlikely(err))
 		return err;
 
-	if ((io_user->hdr.err == -EZUFS_RETRY) &&
-	    io_user->ziom.iom_n && _zufs_iom_pop(io_user->iom_e)) {
+	if (io_user->hdr.err == -EZUFS_RETRY) {
+		if (!(io_user->ziom.iom_n && _zufs_iom_pop(io_user->iom_e))) {
+			zuf_warn("ZUSfs violating API EZUFS_RETRY with no payload\n");
+			/* Server is buggy (or memory got corrupted) let
+			 * the server know
+			 */
+			io_user->hdr.err = -EINVAL;
+			return EZUF_RETRY_DONE;
+		}
+
 		io->hdr.err = zuf_iom_execute_sync(zdo->sb, zdo->inode,
 						   io_user->iom_e,
 						   io_user->ziom.iom_n);
@@ -94,15 +105,6 @@ static int rw_overflow_handler(struct zuf_dispatch_op *zdo, void *arg,
 	}
 
 	/* No tier ups needed */
-
-	if (io_user->hdr.err == -EZUFS_RETRY) {
-		zuf_warn("ZUSfs violating API EZUFS_RETRY with no payload\n");
-		/* continue any way because we want to PUT all these GETs
-		 * we did. But the Server is buggy
-		 */
-		io_user->hdr.err = 0;
-	}
-
 	if (io->hdr.operation != ZUFS_OP_GET_MULTY) {
 		*io = *io_user; /* copy the output to caller */
 		return 0; /* We are finished */
@@ -122,40 +124,40 @@ static int rw_overflow_handler(struct zuf_dispatch_op *zdo, void *arg,
 		io_user->last_pos = io->filepos + new_len;
 	}
 
-	if (io_user->ziom.iom_n) {
-		struct _io_gb_multy *io_gb =
-					container_of(io, typeof(*io_gb), IO);
-		ulong 	offset = (io->filepos & ~PAGE_MASK);
-		uint max_bns = md_o2p_up(offset + new_len);
-
-		/* catch the case num_blocks_of(new_len) mismatch returned
-		 * iom_n. Use the minimum of the two. Also fix last_pos if
-		 * needed
-		 */
-		if (max_bns != io_user->ziom.iom_n) {
-			zuf_err("Bad Server new_len=0x%lx mismatch with iom_n=%d off=0x%lx\n",
-				new_len, io_user->ziom.iom_n, offset);
-			if (max_bns > io_user->ziom.iom_n) {
-				max_bns = io_user->ziom.iom_n;
-				io_user->last_pos = io->filepos +
-						    (md_p2o(max_bns) - offset);
-
-			}
+	if (!io_user->ziom.iom_n) {
+		if (new_len) {
+			zuf_err("[%s] iom_n=0 but new_len=0x%lx\n",
+				_pr_rw(io->rw), new_len);
+			io_user->last_pos = io_user->filepos = io->filepos;
 		}
-
-		zuf_dbg_rw("[%s] _extract_bns(%d) iom_e[0x%llx]\n",
-			   zuf_op_name(io->hdr.operation), max_bns,
-			   io_user->iom_e[0]);
-
 		*io = *io_user;
-		_extract_gb_multy_bns(io_gb, io_user, max_bns);
-	} else if(new_len) {
-		zuf_err("[%s] iom_n=0 but new_len=0x%lx\n",
-			_pr_rw(io->rw), new_len);
-		io_user->last_pos = io_user->filepos = io->filepos;
-		*io = *io_user;
+		return 0;
 	}
 
+	/* extract some bns from payload */
+
+	offset = (io->filepos & ~PAGE_MASK);
+	max_bns = md_o2p_up(offset + new_len);
+
+	/* catch the case num_blocks_of(new_len) mismatch returned iom_n.
+	 * Use the minimum of the two. Also fix last_pos if needed
+	 */
+	if (max_bns != io_user->ziom.iom_n) {
+		zuf_err("Bad Server new_len=0x%lx mismatch with iom_n=%d off=0x%lx\n",
+			new_len, io_user->ziom.iom_n, offset);
+		if (max_bns > io_user->ziom.iom_n) {
+			max_bns = io_user->ziom.iom_n;
+			io_user->last_pos = io->filepos +
+						(md_p2o(max_bns) - offset);
+		}
+	}
+
+	zuf_dbg_rw("[%s] _extract_bns(%d) iom_e[0x%llx]\n",
+			zuf_op_name(io->hdr.operation), max_bns,
+			io_user->iom_e[0]);
+
+	*io = *io_user;
+	_extract_gb_multy_bns(io_gb, io_user, max_bns);
 	return 0;
 }
 
