@@ -282,12 +282,11 @@ int zuf_rw_fallocate(struct inode *inode, uint mode, loff_t pos, loff_t len)
 			   ZUFS_OP_FALLOCATE, 0, NULL, 0, pos, 0);
 
 	if (io.hdr.flags & ZUFS_H_INODE_CLEAN) {
-		zuf_dbg_mmap("[%ld] got hint\n", inode->i_ino);
+		zuf_dbg_rw("[%ld] got hint\n", inode->i_ino);
 		zuf_sync_remove(inode);
 	}
 
 	return err;
-
 }
 
 static struct page *_addr_to_page(unsigned long addr)

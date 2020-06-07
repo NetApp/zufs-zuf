@@ -199,13 +199,13 @@ int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync)
 
 	isize = i_size_read(inode);
 	if (!isize) {
-		zuf_dbg_mmap("[%ld] file is empty\n", inode->i_ino);
+		zuf_dbg_err("[%ld] file is empty\n", inode->i_ino);
 		goto out;
 	}
 	if (isize < uend)
 		uend = isize;
 	if (uend < start) {
-		zuf_dbg_mmap("[%ld] isize=0x%llx start=0x%llx end=0x%lx\n",
+		zuf_dbg_err("[%ld] isize=0x%llx start=0x%llx end=0x%lx\n",
 				 inode->i_ino, isize, start, uend);
 		err = -ENODATA;
 		goto out;
@@ -222,7 +222,7 @@ int zuf_isync(struct inode *inode, loff_t start, loff_t end, int datasync)
 	err = zufc_dispatch(ZUF_ROOT(SBI(inode->i_sb)), &ioc_range.hdr,
 			    NULL, 0);
 	if (ioc_range.hdr.flags & ZUFS_H_INODE_CLEAN) {
-		zuf_dbg_mmap("[%ld] got hint\n", inode->i_ino);
+		zuf_dbg_rw("[%ld] got hint\n", inode->i_ino);
 		zuf_sync_remove(inode);
 	}
 	if (unlikely(err))
