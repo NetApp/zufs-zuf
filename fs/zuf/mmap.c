@@ -97,7 +97,7 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	zus_inode_cmtime_now(inode, zi);
 	/* NOTE: zus needs to flush the zi */
 
-	err = zuf_rw_cached_get(sbi, inode, WRITE | ZUFS_RW_MMAP, NULL,
+	err = zuf_rw_cached_get(sbi, inode, WRITE | ZUFS_RW_MMAP_WRITE, NULL,
 				 md_p2o(vmf->pgoff), PAGE_SIZE, &bn, &io_gb);
 	if (unlikely(err)) {
 		zuf_dbg_err("_get_put_block failed => %d\n", err);

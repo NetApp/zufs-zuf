@@ -291,6 +291,8 @@ enum {
 	ZUFS_FSC_NIO_READS	= 0x0002,
 	ZUFS_FSC_NIO_WRITES	= 0x0004,
 	ZUFS_FSC_SYNC_ALWAYS	= 0x0008,
+	ZUFS_FSC_NO_PINDEX	= 0x0010,
+	ZUFS_FSC_NO_WR_PINDEX	= 0x0020,
 };
 
 struct zufs_mount_info {
@@ -1035,11 +1037,16 @@ enum {
 	ZUFS_RET_LOCKED_PUT	= 0x0010, /* Same as PUT_NOW but must lock a zt
 					   * channel, Because GET took a lock
 					   */
+	ZUFS_RET_NO_INDEX	= 0x0020, /* ZUFS_RW_INDEX requested but not
+					   * allowed for this IO.
+					   */
 };
 
 /* flags for zufs_ioc_IO->rw */
 #define ZUFS_RW_WRITE	BIT(0)	/* SAME as WRITE in Kernel */
+#define ZUFS_RW_INDEX	BIT(1)
 #define ZUFS_RW_MMAP	BIT(1)
+#define ZUFS_RW_MMAP_WRITE BIT(2)
 
 #define ZUFS_RW_RAND	BIT(4)	/* fadvise(random) */
 
