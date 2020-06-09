@@ -661,8 +661,8 @@ static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 	struct inode *dst_inode = file_inode(file_out);
 	struct zuf_inode_info *src_zii = ZUII(src_inode);
 	struct zuf_inode_info *dst_zii = ZUII(dst_inode);
-	ulong src_size = i_size_read(src_inode);
-	ulong dst_size = i_size_read(dst_inode);
+	ulong src_size;
+	ulong dst_size;
 	struct super_block *sb = src_inode->i_sb;
 	ulong len_up;
 	int err;
@@ -699,6 +699,8 @@ static loff_t zuf_clone_file_range(struct file *file_in, loff_t pos_in,
 	if (!(remap_flags & REMAP_FILE_DEDUP))
 		zus_inode_cmtime_now(dst_inode, dst_zii->zi);
 
+	src_size = i_size_read(src_inode);
+	dst_size = i_size_read(dst_inode);
 	/* See about all-file-clone optimization */
 	len_up = len;
 	if (!pos_in && !pos_out && (src_size <= pos_in + len) &&
