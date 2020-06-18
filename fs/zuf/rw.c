@@ -905,7 +905,7 @@ static int iom_unmap(struct super_block *sb, struct inode *inode, __u64 **cur_e)
 	ulong	unmap_index = _zufs_iom_first_val(&iom_unmap->unmap_index);
 	ulong	unmap_n = iom_unmap->unmap_n;
 	ulong	ino = iom_unmap->ino;
-	int flags = 0;
+	int flags = EZUF_PIU_AT_iom_unmap;
 
 	if (!inode || ino) {
 		if (WARN_ON(!ino)) {

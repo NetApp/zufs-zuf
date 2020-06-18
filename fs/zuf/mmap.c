@@ -95,6 +95,8 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	zus_inode_cmtime_now(inode, zi);
 	/* NOTE: zus needs to flush the zi */
 
+	zuf_pi_unmap(inode, md_p2o(vmf->pgoff), PAGE_SIZE, EZUF_PIU_AT_wmmap);
+
 	err = zuf_rw_cached_get(sbi, inode, WRITE | ZUFS_RW_MMAP_WRITE, NULL,
 				 md_p2o(vmf->pgoff), PAGE_SIZE, &bn, &io_gb);
 	if (unlikely(err)) {
@@ -113,7 +115,6 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 		/* newly created block */
 		inode->i_blocks = le64_to_cpu(zii->zi->i_blocks);
 	}
-	zuf_pi_unmap(inode, vmf->pgoff << PAGE_SHIFT, PAGE_SIZE, 0);
 
 	pfn = md_pfn(sbi->md, pmem_bn);
 	pfnt = phys_to_pfn_t(PFN_PHYS(pfn), PFN_MAP | PFN_DEV);

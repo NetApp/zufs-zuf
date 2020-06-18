@@ -87,8 +87,19 @@ long __zuf_fallocate(struct inode *inode, int mode, loff_t offset, loff_t len)
 	}
 
 	if (need_unmap) {
+		uint tr_f = EZUF_PIU_EVEN_COWS;
+		/* These values will show on zuf_pi_unmap flags
+		FALLOC_FL_PUNCH_HOLE		0x020
+		FALLOC_FL_COLLAPSE_RANGE	0x080
+		FALLOC_FL_ZERO_RANGE		0x100
+		FALLOC_FL_INSERT_RANGE		0x200
+		FALLOC_FL_UNSHARE_RANGE		0x400
+		ZUFS_FL_TRUNCATE		0x800
+		*/
+		tr_f |= (mode & ZUFS_FL_TRUNCATE) ? 0x800 : (mode << 4);
+
 		zufc_goose_all_zts(ZUF_ROOT(SBI(inode->i_sb)), inode);
-		zuf_pi_unmap(inode, offset, unmap_len, EZUF_PIU_EVEN_COWS);
+		zuf_pi_unmap(inode, offset, unmap_len, tr_f);
 	}
 
 	zus_inode_cmtime_now(inode, zii->zi);
@@ -565,11 +576,17 @@ static int _clone_file_range(struct inode *src_inode, loff_t pos_in,
 	};
 	int err;
 
-	/* NOTE: len==0 means to-end-of-file which is what we want */
-	zuf_pi_unmap(src_inode, pos_in,  len, EZUF_PIU_SYNC);
-	zuf_pi_unmap(dst_inode, pos_out, len, 0);
-
 	zufc_goose_all_zts(ZUF_ROOT(SBI(dst_inode->i_sb)), dst_inode);
+
+	/* NOTE: len==0 means to-end-of-file which is what we want
+	 * We also remove indexing of source so we can update on
+	 * shared info.
+	 */
+	zuf_pi_unmap(src_inode, pos_in,  len, EZUF_PIU_AT_COW1);
+	zuf_pi_unmap(dst_inode, pos_out, len, EZUF_PIU_AT_COW2);
+
+	zuf_dbg_vfs("SRC[%ld] [@x%llx-0x%llx] DST[%ld] [@x%llx]\n",
+		    src_inode->i_ino, pos_in, len, dst_inode->i_ino, pos_out);
 
 	if ((len_up == 0) && (pos_in || pos_out)) {
 		zuf_err("Boaz Smoking 0x%llx 0x%llx 0x%llx\n",

@@ -490,6 +490,13 @@ enum {
 	EZUF_PIU_EVEN_COWS	= 1,
 	EZUF_PIU_SYNC		= 2,
 	EZUF_PIU_UNLOCKED	= 4,
+
+	/* Debug flags */
+	/* fallocate has 0x20 - 0x800 */
+	EZUF_PIU_AT_COW1	= 0x1000,
+	EZUF_PIU_AT_COW2	= 0x1100,
+	EZUF_PIU_AT_wmmap	= 0x2000,
+	EZUF_PIU_AT_iom_unmap	= 0x3000,
 };
 
 /* Keep this include last thing in file */
