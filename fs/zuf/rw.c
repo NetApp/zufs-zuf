@@ -899,6 +899,45 @@ out:
 	return err;
 }
 
+static int _inode_match(struct inode *inode, ulong ino, void *data)
+{
+	int ret;
+
+	if (inode->i_ino != ino)
+		return 0;
+
+	spin_lock(&inode->i_lock);
+
+	if ((inode->i_state & (I_FREEING|I_WILL_FREE)) ||
+	    !atomic_read(&inode->i_count)) {
+zuf_warn("[%ld] Saved by the bell ref(%d) st(0x%lx)\n",
+	 ino, atomic_read(&inode->i_count), inode->i_state);
+		ret = 2; /* this means find_inode_nowait will return NULL */
+		goto out;
+	}
+	if (unlikely(inode->i_state & I_CREATING)) {
+		/* We do not expect that at all */
+		zuf_warn("these inodes should not be here\n");
+		ret = -ESTALE;
+		goto out;
+	}
+	ihold(inode);
+	ret = 1;
+
+out:
+	spin_unlock(&inode->i_lock);
+	return ret;
+}
+
+/* The regular ilookup gets stuck waiting for evicting inodes to finish.
+ * This will dead-lock with the evict dispatch that must wait for here unmaps
+ * To finish. Doing find_inode_nowait is what we want see below comment.
+ */
+static struct inode *_rw_ilookup(struct super_block *sb, ulong ino)
+{
+	return find_inode_nowait(sb, ino, _inode_match, NULL);
+}
+
 static int iom_unmap(struct super_block *sb, struct inode *inode, __u64 **cur_e)
 {
 	struct zufs_iom_unmap *iom_unmap = (void *)*cur_e;
@@ -915,7 +954,7 @@ static int iom_unmap(struct super_block *sb, struct inode *inode, __u64 **cur_e)
 				unmap_n);
 			goto out;
 		}
-		inode_look = ilookup(sb, ino);
+		inode_look = _rw_ilookup(sb, ino);
 		if (!inode_look) {
 			/* From the time we requested an unmap to now
 			 * inode was evicted from cache so surely it no longer
