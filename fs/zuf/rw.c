@@ -269,7 +269,6 @@ out:
 	return err;
 }
 
-/* ZERO a part of a single block. len does not cross a block boundary */
 int zuf_rw_fallocate(struct inode *inode, uint mode, loff_t pos, loff_t len)
 {
 	struct zufs_ioc_IO io = {};
@@ -568,6 +567,9 @@ void zuf_rw_cached_put(struct zuf_sb_info *sbi, struct inode *inode,
 			struct _io_gb_multy *io_gb)
 {
 	_IO_put_multy(sbi, inode, io_gb);
+	if (io_gb->IO.wr_unmap.len)
+		zuf_pi_unmap(inode, io_gb->IO.wr_unmap.offset,
+			     io_gb->IO.wr_unmap.len, 0x4000);
 }
 
 static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
@@ -608,7 +610,7 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 
 		len = min_t(uint, PAGE_SIZE - offset, size);
 
-		bn = io_gb.bns[i++];
+		bn = io_gb.bns[i];
 		if (rw & WRITE)
 			err = _write_one(sbi, ii, bn, offset, len, i);
 		else
@@ -619,16 +621,15 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 		zuf_dbg_rw("[%ld]       %s [@x%04llx-0x%04x] bn=0x%04lx [%d]\n",
 			    inode->i_ino, _pr_rw(rw), pos, len, bn, i);
 
+		++i;
 		pos += len;
 		size -= len;
 		offset = 0;
 	}
-	zuf_rw_cached_put(sbi, inode, &io_gb);
-out:
-	if (io_gb.IO.wr_unmap.len)
-		zuf_pi_unmap(inode, io_gb.IO.wr_unmap.offset,
-			     io_gb.IO.wr_unmap.len, 0);
 
+	zuf_rw_cached_put(sbi, inode, &io_gb);
+
+out:
 	return unlikely(pos == start) ? err : pos - start;
 }
 
