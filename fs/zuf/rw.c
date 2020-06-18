@@ -462,7 +462,7 @@ static int _IO_get_multy(struct zuf_sb_info *sbi, struct inode *inode, uint rw,
 			 ulong *bns, struct _io_gb_multy *io_gb)
 {
 	struct zufs_ioc_IO *IO = &io_gb->IO;
-	uint retry = 100;
+	uint retry = 0;
 	int err;
 
 do_retry:
@@ -518,8 +518,8 @@ do_retry:
 		 * means Server returned with zero length for us to retry
 		 * the operation.
 		 */
-		if (!--retry)
-			return -EIO;
+		if (++retry % 10 == 0)
+			msleep(retry / 100);
 		schedule();
 		goto do_retry;
 	}
