@@ -45,14 +45,6 @@ static int _cow_private_page(struct vm_area_struct *vma, struct vm_fault *vmf)
 	return VM_FAULT_LOCKED;
 }
 
-static inline ulong _gb_bn(struct zufs_ioc_IO *get_block)
-{
-	if (unlikely(!get_block->ziom.iom_n))
-		return 0;
-
-	return _zufs_iom_t1_bn(get_block->iom_e[0]);
-}
-
 static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 				  struct vm_fault *vmf)
 {
@@ -60,7 +52,6 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	struct zuf_sb_info *sbi = SBI(inode->i_sb);
 	struct zuf_inode_info *zii = ZUII(inode);
 	struct zus_inode *zi = zii->zi;
-	ulong bn;
 	struct _io_gb_multy io_gb;
 	vm_fault_t fault = VM_FAULT_SIGBUS;
 	ulong addr = vmf->address;
@@ -98,12 +89,12 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	zuf_pi_unmap(inode, md_p2o(vmf->pgoff), PAGE_SIZE, EZUF_PIU_AT_wmmap);
 
 	err = zuf_rw_cached_get(sbi, inode, WRITE | ZUFS_RW_MMAP_WRITE, NULL,
-				 md_p2o(vmf->pgoff), PAGE_SIZE, &bn, &io_gb);
+			       md_p2o(vmf->pgoff), PAGE_SIZE, &pmem_bn, &io_gb);
 	if (unlikely(err)) {
 		zuf_dbg_err("_get_put_block failed => %d\n", err);
 		goto out;
 	}
-	pmem_bn = _gb_bn(&io_gb.IO);
+
 	if (unlikely(pmem_bn == 0)) {
 		zuf_err("[%ld] pmem_bn=0  rw=0x%llx ret_flags=0x%x but no error?\n",
 			_zi_ino(zi), io_gb.IO.rw, io_gb.IO.ret_flags);
@@ -117,6 +108,8 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	}
 
 	pfn = md_pfn(sbi->md, pmem_bn);
+	if (unlikely(!pfn))
+		goto put; /* Pi bugs md_pfn cried */
 	pfnt = phys_to_pfn_t(PFN_PHYS(pfn), PFN_MAP | PFN_DEV);
 	fault = vmf_insert_mixed_mkwrite(vma, addr, pfnt);
 	err = zuf_flt_to_err(fault);
@@ -150,7 +143,6 @@ static vm_fault_t zuf_read_fault(struct vm_area_struct *vma,
 	struct zuf_sb_info *sbi = SBI(inode->i_sb);
 	struct zuf_inode_info *zii = ZUII(inode);
 	struct zus_inode *zi = zii->zi;
-	ulong bn;
 	struct _io_gb_multy io_gb;
 	vm_fault_t fault = VM_FAULT_SIGBUS;
 	ulong addr = vmf->address;
@@ -184,20 +176,22 @@ static vm_fault_t zuf_read_fault(struct vm_area_struct *vma,
 
 	err = zuf_rw_cached_get(sbi, inode, READ | ZUFS_RW_MMAP,
 				 &vma->vm_file->f_ra, md_p2o(vmf->pgoff),
-				 PAGE_SIZE, &bn, &io_gb);
-	if (unlikely(err && err != -EINTR)) {
+				 PAGE_SIZE, &pmem_bn, &io_gb);
+	if (unlikely(err /*&& err != -EINTR*/)) {
 		zuf_err("_get_put_block failed => %d\n", err);
 		goto out;
 	}
 
-	pmem_bn = _gb_bn(&io_gb.IO);
 	if (pmem_bn == 0) {
 		/* Hole in file */
 		pfnt = pfn_to_pfn_t(my_zero_pfn(vmf->address));
 	} else {
 		/* We have a real page */
-		pfnt = phys_to_pfn_t(PFN_PHYS(md_pfn(sbi->md, pmem_bn)),
-				     PFN_MAP | PFN_DEV);
+		ulong pfn = md_pfn(sbi->md, pmem_bn);
+
+		if (unlikely(!pfn))
+			goto put; /* Pi bugs md_pfn cried */
+		pfnt = phys_to_pfn_t(PFN_PHYS(pfn), PFN_MAP | PFN_DEV);
 	}
 	fault = vmf_insert_mixed(vma, addr, pfnt);
 	err = zuf_flt_to_err(fault);
