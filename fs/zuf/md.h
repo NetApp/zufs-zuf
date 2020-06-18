@@ -150,25 +150,33 @@ static inline uuid_le *md_main_uuid(struct multi_devices *md)
 }
 
 #ifdef __KERNEL__
-static inline ulong md_pfn(struct multi_devices *md, ulong block)
+static inline ulong md_pfn(struct multi_devices *md, ulong bn)
 {
 	struct md_dev_info *mdi;
 	bool add_pfn = false;
 	ulong base_pfn;
 
-	if (unlikely(md_t1_blocks(md) <= block)) {
-		if (WARN_ON(!mdt_test_option(md_zdt(md), MDT_F_SHADOW)))
+	if (unlikely(md_t1_blocks(md) <= bn)) {
+		if (WARN_ON(!mdt_test_option(md_zdt(md), MDT_F_SHADOW))) {
+			md_err("!!!bn=0x%lx t1_s=0x%lx\n",
+			       bn, md_t1_blocks(md));
 			return 0;
-		block -= md_t1_blocks(md);
+		}
+		bn -= md_t1_blocks(md);
 		add_pfn = true;
+		if (unlikely(md_t1_blocks(md) <= bn)) {
+			md_err("!!!Shadow addr bn=0x%lx t1_s=0x%lx\n",
+			       bn, md_t1_blocks(md));
+			return 0;
+		}
 	}
 
-	mdi = md_bn_t1_dev(md, block);
+	mdi = md_bn_t1_dev(md, bn);
 	if (add_pfn)
 		base_pfn = mdi->t1i.phys_pfn + md_o2p(mdi->size);
 	else
 		base_pfn = mdi->t1i.phys_pfn;
-	return base_pfn + (block - md_o2p(mdi->offset));
+	return base_pfn + (bn - md_o2p(mdi->offset));
 }
 #endif /* def __KERNEL__ */
 
