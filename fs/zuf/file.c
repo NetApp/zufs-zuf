@@ -732,7 +732,7 @@ static ssize_t zuf_read_iter(struct kiocb *kiocb, struct iov_iter *ii)
 	struct zuf_inode_info *zii = ZUII(inode);
 	ssize_t ret;
 
-	zuf_dbg_rw("[%ld] ppos=0x%llx len=0x%zx\n",
+	zuf_dbg_rw("[%ld] @x%llx len=0x%zx\n",
 		     inode->i_ino, kiocb->ki_pos, iov_iter_count(ii));
 
 	file_accessed(kiocb->ki_filp);
@@ -754,9 +754,12 @@ static ssize_t zuf_write_iter(struct kiocb *kiocb, struct iov_iter *ii)
 	ssize_t ret;
 	loff_t end_offset;
 
+	zuf_dbg_rw("[%ld] @x%llx len=0x%zx\n",
+		     inode->i_ino, kiocb->ki_pos, iov_iter_count(ii));
+
 	ret = generic_write_checks(kiocb, ii);
 	if (unlikely(ret < 0)) {
-		zuf_dbg_vfs("[%ld] generic_write_checks => 0x%lx\n",
+		zuf_dbg_rw("[%ld] generic_write_checks => 0x%lx\n",
 			    inode->i_ino, ret);
 		return ret;
 	}

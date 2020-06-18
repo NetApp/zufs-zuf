@@ -28,7 +28,7 @@ static int _cow_private_page(struct vm_area_struct *vma, struct vm_fault *vmf)
 	err = zuf_rw_read_page(sbi, inode, vmf->cow_page,
 			       md_p2o(vmf->pgoff));
 	if (unlikely(err && err != -EINTR)) {
-		zuf_err("[%ld] read_page failed bn=0x%lx address=0x%lx => %d\n",
+		zuf_err("[%ld] read_page failed @x%lx address=0x%lx => %d\n",
 			inode->i_ino, vmf->pgoff, vmf->address, err);
 		return VM_FAULT_SIGBUS;
 	}
@@ -70,10 +70,8 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	ulong pfn;
 	int err;
 
-	zuf_dbg_mmap("[%ld] vm_start=0x%lx vm_end=0x%lx VA=0x%lx "
-		    "pgoff=0x%lx vmf_flags=0x%x cow_page=%p page=%p\n",
-		    _zi_ino(zi), vma->vm_start, vma->vm_end, addr, vmf->pgoff,
-		    vmf->flags, vmf->cow_page, vmf->page);
+	zuf_dbg_mmap("[%ld] [@x%lx] vm_start=0x%lx VA=0x%lx vmf_flags=0x%x\n",
+		    _zi_ino(zi), vmf->pgoff, vma->vm_start, addr, vmf->flags);
 
 	sb_start_pagefault(inode->i_sb);
 	zuf_smr_lock_pagefault(zii);
@@ -82,7 +80,7 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 	if (unlikely(vmf->pgoff >= size)) {
 		ulong pgoff = vma->vm_pgoff + md_o2p(addr - vma->vm_start);
 
-		zuf_dbg_err("[%ld] pgoff(0x%lx)(0x%lx) >= size(0x%lx) => SIGBUS\n",
+		zuf_dbg_err("[%ld] pgoff(@x%lx)(@x%lx) >= size(0x%lx) => SIGBUS\n",
 			    _zi_ino(zi), vmf->pgoff, pgoff, size);
 
 		fault = VM_FAULT_SIGBUS;
@@ -127,8 +125,8 @@ static vm_fault_t zuf_write_fault(struct vm_area_struct *vma,
 		goto put;
 	}
 
-	zuf_dbg_mmap("[%ld] vm_insert_mixed 0x%lx prot=0x%lx => %d\n",
-		    _zi_ino(zi), pfn, vma->vm_page_prot.pgprot, err);
+	zuf_dbg_mmap("[%ld] [@x%lx] vm_insert_mixed 0x%lx pfn=0x%lx prot=0x%lx => %d\n",
+		    _zi_ino(zi), vmf->pgoff, pmem_bn, pfn, vma->vm_page_prot.pgprot, err);
 
 	zuf_sync_add(inode);
 put:
@@ -160,10 +158,8 @@ static vm_fault_t zuf_read_fault(struct vm_area_struct *vma,
 	pfn_t pfnt;
 	int err;
 
-	zuf_dbg_mmap("[%ld] vm_start=0x%lx vm_end=0x%lx VA=0x%lx "
-		    "pgoff=0x%lx vmf_flags=0x%x cow_page=%p page=%p\n",
-		    _zi_ino(zi), vma->vm_start, vma->vm_end, addr, vmf->pgoff,
-		    vmf->flags, vmf->cow_page, vmf->page);
+	zuf_dbg_mmap("[%ld] [@x%lx] vm_start=0x%lx VA=0x%lx vmf_flags=0x%x\n",
+		    _zi_ino(zi), vmf->pgoff, vma->vm_start, addr, vmf->flags);
 
 	zuf_smr_lock_pagefault(zii);
 
@@ -210,8 +206,8 @@ static vm_fault_t zuf_read_fault(struct vm_area_struct *vma,
 		goto put;
 	}
 
-	zuf_dbg_mmap("[%ld] vm_insert_mixed pmem_bn=0x%lx fault=%d\n",
-		     _zi_ino(zi), pmem_bn, fault);
+	zuf_dbg_mmap("[%ld] [@x%lx] vm_insert_mixed pmem_bn=0x%lx fault=%d\n",
+		     _zi_ino(zi), vmf->pgoff, pmem_bn, fault);
 
 put:
 	if (pmem_bn)
@@ -242,6 +238,10 @@ static void zuf_mmap_close(struct vm_area_struct *vma)
 {
 	struct inode *inode = file_inode(vma->vm_file);
 	int vma_count = atomic_dec_return(&ZUII(inode)->vma_count);
+
+	zuf_dbg_mmap("[%ld] start=0x%lx end=0x%lx vma_count=%d\n",
+		     vma->vm_file->f_inode->i_ino, vma->vm_start, vma->vm_end,
+	             vma_count);
 
 	if (unlikely(vma_count < 0))
 		zuf_err("[%ld] WHAT??? vma_count=%d\n",
@@ -286,7 +286,7 @@ int zuf_file_mmap(struct file *file, struct vm_area_struct *vma)
 
 	atomic_inc(&zii->vma_count);
 
-	zuf_dbg_vfs("[%ld] start=0x%lx end=0x%lx flags=0x%lx page_prot=0x%lx\n",
+	zuf_dbg_mmap("[%ld] start=0x%lx end=0x%lx flags=0x%lx page_prot=0x%lx\n",
 		     file->f_mapping->host->i_ino, vma->vm_start, vma->vm_end,
 		     vma->vm_flags, pgprot_val(vma->vm_page_prot));
 

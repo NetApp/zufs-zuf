@@ -282,7 +282,7 @@ int zuf_rw_fallocate(struct inode *inode, uint mode, loff_t pos, loff_t len)
 			   ZUFS_OP_FALLOCATE, 0, NULL, 0, pos, 0);
 
 	if (io.hdr.flags & ZUFS_H_INODE_CLEAN) {
-		zuf_dbg_rw("[%ld] got hint\n", inode->i_ino);
+		zuf_dbg_verbose("sync: [%ld] got hint\n", inode->i_ino);
 		zuf_sync_remove(inode);
 	}
 
@@ -588,11 +588,17 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 	if (unlikely(err))
 		return err;
 
+	zuf_dbg_rw("[%ld] %s [@x%llx-0x%zx] {0x%llx}\n",
+		   inode->i_ino, _pr_rw(rw), pos, size,
+		   io_gb.IO.last_pos - pos);
+
 	if (unlikely(io_gb.IO.last_pos != (pos + size))) {
 		size = io_gb.IO.last_pos - pos;
 		zuf_dbg_rw("I see this pos=0x%llx size=0x%zx\n", pos, size);
-		if (!size)
+		if (!size) {
+			zuf_warn("Is this a BUG\n");
 			goto out;
+		}
 	}
 
 	i = 0;
@@ -610,7 +616,7 @@ static ssize_t _IO_gm_inner(struct zuf_sb_info *sbi, struct inode *inode,
 		if (unlikely(err))
 			break;
 
-		zuf_dbg_rw("[%ld]	%s [0x%llx-0x%x] bn=0x%lx [%d]\n",
+		zuf_dbg_rw("[%ld]       %s [@x%04llx-0x%04x] bn=0x%04lx [%d]\n",
 			    inode->i_ino, _pr_rw(rw), pos, len, bn, i);
 
 		pos += len;
@@ -920,16 +926,20 @@ static int iom_unmap(struct super_block *sb, struct inode *inode, __u64 **cur_e)
 			 *    current usage it cannot happen. But before
 			 *    upstream we should convert to zuf_dbg_err
 			 */
-			zuf_warn("[%ld] 0x%lx-0x%lx\n",
+			zuf_warn("[%ld] @x%lx-0x%lx\n",
 				 ino, unmap_index, unmap_n);
 			goto out;
 		}
 
 		inode = inode_look;
 		flags = EZUF_PIU_UNLOCKED;
+	} else {
+		zuf_err("[%ld] unmap with inode\n", inode->i_ino);
 	}
 
-	zuf_dbg_rw("[%ld] 0x%lx-0x%lx\n", inode->i_ino, unmap_index, unmap_n);
+	zuf_dbg_mmap("[%ld] @x%lx-0x%lx lookup=%ld\n",
+		     inode->i_ino, unmap_index, unmap_n,
+		     inode_look ? inode_look->i_ino : -1);
 
 	zuf_pi_unmap(inode, md_p2o(unmap_index), md_p2o(unmap_n), flags);
 
